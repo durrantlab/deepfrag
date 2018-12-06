@@ -1,20 +1,30 @@
-import openbabel
+
 import numpy as np
 
-import grid
+# optional dependency
+HAS_OPENBABEL = False
+try:
+    import openbabel
+    HAS_OPENBABEL = True
+except:
+    pass
+
 
 class Mol(object):
-    '''
+    """
     Minimal representation of a ligand/fragment.
-    '''
+    """
 
     def __init__(self):
+        """
+        Initialize an empty molecule
+        """
         self.atoms = []
         self.conn = []
         self.frag = []
     
     def to_string(self):
-        '''
+        """
         Convert to csv-like string format:
 
         n
@@ -32,7 +42,7 @@ class Mol(object):
         frag_1.x,frag_1.y,frag_1.z,frag_1.t
         ...
         frag_m-1.x,frag_m-1.y,frag_m-1.z,frag_m-1.t
-        '''
+        """
         s = ''
 
         s += str(len(self.atoms)) + '\n'
@@ -50,9 +60,9 @@ class Mol(object):
         return s
 
     def center(self):
-        '''
-        Returns the average center point of all the atoms
-        '''
+        """
+        Returns the average atomic coordinate in the molecule
+        """
         p = []
 
         for a in (self.atoms + self.conn + self.frag):
@@ -62,12 +72,15 @@ class Mol(object):
     
     @staticmethod
     def from_pybel(pybel_molecule, fragment=None):
-        '''
+        """
         Create a Mol from a given pybel.Molecule. Optionally, provide a list of atoms
         to consider as a separate fragment.
 
         Note: atoms are indexed starting from 1
-        '''
+        """
+        if not HAS_OPENBABEL:
+            raise Exception("Need openbabel")
+        
         m = Mol()
 
         for a in pybel_molecule.atoms:
@@ -97,19 +110,60 @@ class Mol(object):
         return m
 
     @staticmethod
+    def from_string(s):
+        """
+        Read a single Mol from a string
+        """
+        m = Mol()
+
+        dat = s.strip().split('\n')
+
+        i = 0
+
+        # read number of atoms
+        num_atoms = int(dat[i])
+
+        for atom_line in dat[i+1:i+1+num_atoms]:
+            [x,y,z,t] = atom_line.split(',')
+
+            m.atoms.append((float(x), float(y), float(z), int(t)))
+
+        i += num_atoms + 1
+
+        # read number of connector atoms
+        num_conn = int(dat[i])
+
+        for conn_line in dat[i+1:i+1+num_conn]:
+            [x,y,z,t] = conn_line.split(',')
+
+            m.conn.append((float(x), float(y), float(z), int(t)))
+
+        i += num_conn + 1
+
+        # read number of fragment atoms
+        num_frag = int(dat[i])
+
+        for frag_line in dat[i+1:i+1+num_frag]:
+            [x,y,z,t] = frag_line.split(',')
+
+            m.frag.append((float(x), float(y), float(z), int(t)))
+
+        return m
+
+    @staticmethod
     def writefile(filename, mols):
-        '''
+        """
         Write a list of mols to a file
-        '''
+        """
         with open(filename, 'w') as f:
             for m in mols:
                 f.write(m.to_string())
 
     @staticmethod
     def readfile(filename):
-        '''
+        """
         Read a list of Mols from a file
-        '''
+        """
         dat = open(filename).read().strip().split('\n')
 
         if dat[0] == '':

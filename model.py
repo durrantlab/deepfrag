@@ -36,13 +36,13 @@ class MolPredictModel(object):
 
         # downsampling layers
         x = Conv3D(64, (3,3,3), padding='same', activation='relu')(x)
-        x = Conv3D(64, (3,3,3), padding='same', activation='relu')(x)
+        # x = Conv3D(64, (3,3,3), padding='same', activation='relu')(x)
         x = MaxPool3D((2,2,2))(x)
         x = Conv3D(128, (3,3,3), padding='same', activation='relu')(x)
-        x = Conv3D(128, (3,3,3), padding='same', activation='relu')(x)
+        # x = Conv3D(128, (3,3,3), padding='same', activation='relu')(x)
         x = MaxPool3D((2,2,2))(x)
         x = Conv3D(256, (3,3,3), padding='same', activation='relu')(x)
-        x = Conv3D(256, (3,3,3), padding='same', activation='relu')(x)
+        # x = Conv3D(256, (3,3,3), padding='same', activation='relu')(x)
         
         # upsample
         # x = Deconv3D(1, (3,3,3), strides=2, padding='same', activation='relu')(x)

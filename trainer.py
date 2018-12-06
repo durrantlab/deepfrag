@@ -54,9 +54,12 @@ def grid_generator(training_data, batch_size, grid_width, grid_resolution):
             # generate grid
             center = ligand.center()
 
-            g_target = grid.generate_grid_cpu(target.atoms, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution)
-            g_ligand = grid.generate_grid_cpu(ligand.atoms + ligand.conn, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution)
-            g_frag = np.sum(grid.generate_grid_cpu(ligand.frag, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution), axis=3)
+            # g_target = grid.generate_grid_cpu(target.atoms, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution)
+            g_target = grid.generate_grid_fast(target.atoms, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution)
+            # g_ligand = grid.generate_grid_cpu(ligand.atoms + ligand.conn, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution)
+            g_ligand = grid.generate_grid_fast(ligand.atoms + ligand.conn, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution)
+            # g_frag = np.sum(grid.generate_grid_cpu(ligand.frag, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution), axis=3)
+            g_frag = np.sum(grid.generate_grid_fast(ligand.frag, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution), axis=3)
             g_frag = np.reshape(g_frag, g_frag.shape + (1,))
 
             # add active to batch
@@ -88,9 +91,12 @@ def full_grid_generator(data, grid_width, grid_resolution):
         for ligand in tqdm.tqdm(ligs[:10]):
             center = ligand.center()
 
-            g_target = grid.generate_grid_cpu(target.atoms, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution)
-            g_ligand = grid.generate_grid_cpu(ligand.atoms + ligand.conn, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution)
-            g_frag = np.sum(grid.generate_grid_cpu(ligand.frag, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution), axis=3)
+            # g_target = grid.generate_grid_cpu(target.atoms, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution)
+            g_target = grid.generate_grid_fast(target.atoms, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution)
+            # g_ligand = grid.generate_grid_cpu(ligand.atoms + ligand.conn, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution)
+            g_ligand = grid.generate_grid_fast(ligand.atoms + ligand.conn, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution)
+            # g_frag = np.sum(grid.generate_grid_cpu(ligand.frag, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution), axis=3)
+            g_frag = np.sum(grid.generate_grid_fast(ligand.frag, ATOM_TYPES, VDW_RADIUS, center, grid_width, grid_resolution), axis=3)
             g_frag = np.reshape(g_frag, g_frag.shape + (1,))
 
             targets.append(g_target)

@@ -1,22 +1,48 @@
 
+import math
+
+from numba import cuda
 import numpy as np
 
 import rotation
 
 
-def smoothed_gaussian(d,r):
-    '''
-    Continuous piecwise gaussian from 0 to r that goes to zero from
-    r to r*1.5.
+# support (8,8,8) invocations
+GPU_DIM = 8
 
-    Equation 1 in Protein-Ligand Scoring with Convolutional Neural Networks
-    '''
-    if d < r:
-        return np.exp((-2 * (d**2)) / (r**2))
-    elif r <= d <= (1.5 * r):
-        return ((4 / (np.exp(2) * (r**2))) * (d**2)) - ((12 / (np.exp(2) * r)) * d) + (9 / np.exp(2))
-    else:
-        return 0
+
+@cuda.jit
+def add_atoms(grid, atom_coords, atom_layer, atom_vdw, num_atoms, grid_span):
+    """
+    GPU Kernel invoked on each (x,y,z) point in the grid
+    """
+    x,y,z = cuda.grid(3)
+    
+    # out of bounds check
+    if x < 0 or y < 0 or z < 0 or x >= grid_span or y >= grid_span or z >= grid_span:
+            return
+
+    # iterate over atoms
+    for i in range(num_atoms):
+        coords = atom_coords[i]
+        layer = atom_layer[i]
+        vdw = atom_vdw[i]
+        
+        dist = math.sqrt((x - coords[0])**2 + (y - coords[1])**2 + (z - coords[2])**2)
+        
+        d = dist
+        r = vdw
+
+        # smoothed gaussian equation
+        if d < r:
+            v = math.exp((-2 * (d**2)) / (r**2))
+        elif r <= d <= (1.5 * r):
+            v = ((4 / (math.exp(2.0) * (r**2))) * (d**2)) - ((12 / (math.exp(2.0) * r)) * d) + (9 / math.exp(2.0))
+        else:
+            v = 0
+    
+        # add grid effect
+        grid[x,y,z,int(layer)] += v
 
 
 def generate_grid(
@@ -30,7 +56,7 @@ def generate_grid(
     translation_vec=np.array([0,0,0])
     ):
     """
-    Generate a grid for a molecule on the cpu.
+    Generate a grid for a molecule on the gpu.
 
     atoms: list of (x,y,z,atom_type)
     vdw_radius: mapping from atom type to van der waals radius
@@ -53,16 +79,20 @@ def generate_grid(
     # define an empty grid
     grid = np.zeros((grid_span, grid_span, grid_span, len(atom_types)))
 
-    # bounding corners
-    g_min = np.array(center) - (width / 2.0)
-    g_max = np.array(center) + (width / 2.0)
+    # filter atoms in atom_types
+    atoms = [atom for atom in atoms if atom[3] in atom_types]
+    
+    # prepare data
+    atom_coords = np.zeros((len(atoms), 3))
+    atom_layer = np.zeros(len(atoms))
+    atom_vdw = np.zeros(len(atoms))
 
     # iterate through atoms
-    for atom in atoms:
+    for i in range(len(atoms)):
+        atom = atoms[i]
+        
         # get atom type
         atom_type = atom[3]
-        if atom_type not in atom_types:
-            continue
 
         # get layer
         layer = atom_indirect[atom_type]
@@ -76,7 +106,7 @@ def generate_grid(
 
         # normalize to center
         coords_normal = coords - center
-
+        
         # apply rotation
         coords_rotated = rotation.apply_rot(coords_normal, rotation_vec)
         
@@ -95,28 +125,15 @@ def generate_grid(
         # scale by resolution
         vdw_scaled = vdw / resolution
 
-        # bounding box of vdw radius in grid space
-        vdw_min = np.floor(coords_grid - vdw_scaled).astype(int)
-        vdw_max = np.ceil(coords_grid + vdw_scaled + 1).astype(np.int)
+        atom_coords[i] = coords_grid
+        atom_layer[i] = layer
+        atom_vdw[i] = vdw_scaled
 
-        # multidimensional iteration
-        for off in np.ndindex(tuple(vdw_max - vdw_min)):
-        # for off in [np.round(coords_grid - vdw_min).astype(int)]:
-            # print(off)
-            idx = vdw_min + off
-            [x,y,z] = idx
-            # print(idx)
+    dx = int(np.ceil(grid_span / GPU_DIM))
+    dy = int(np.ceil(grid_span / GPU_DIM))
+    dz = int(np.ceil(grid_span / GPU_DIM))
 
-            if x < 0 or y < 0 or z < 0 or x >= grid_span or y >= grid_span or z >= grid_span:
-                continue
-
-            # compute distance
-            dist = np.linalg.norm((coords_grid - idx) * resolution)
-
-            # compute value
-            v = smoothed_gaussian(dist, vdw)
-
-            # add grid effect
-            grid[x,y,z,layer] += v
+    # invoke the GPU kernel
+    add_atoms[(dx,dy,dz), (GPU_DIM,GPU_DIM,GPU_DIM)](grid, atom_coords, atom_layer, atom_vdw, len(atoms), grid_span)
 
     return grid
