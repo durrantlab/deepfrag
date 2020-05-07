@@ -1,0 +1,11 @@
+**/*.pyc
+**/__pycache__
+.ipynb_checkpoints
+
+data/**
+!data/README.md
+
+pretrained/**
+!pretrained/README.md
+
+.DS_Store

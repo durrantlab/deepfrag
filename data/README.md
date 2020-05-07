@@ -1,0 +1,3 @@
+This folder contains data used during training and inference.
+
+You can download the data here: ...
