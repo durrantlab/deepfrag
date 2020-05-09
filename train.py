@@ -13,13 +13,8 @@ from leadopt.data_util import FragmentDataset
 
 from config import partitions
 
-from models import MODELS
+from leadopt.model_conf import MODELS
 
-
-# LOSS = {
-#     'bce': nn.BCELoss(),
-#     'mse': nn.MSELoss(),
-# }
 
 def main():
     parser = argparse.ArgumentParser()
@@ -125,7 +120,6 @@ def main():
     metrics = MODELS[args.version].get_metrics(args, std, mean, train_dat, test_dat)
 
     # create loss function
-    # loss_fn = LOSS[args.loss]
     loss_fn = MODELS[args.version].get_loss(args, std, mean, train_dat, test_dat)
 
     train_func = MODELS[args.version].get_train_mode()

@@ -87,13 +87,13 @@ def train(model, run_path, train_dat, test_dat, metrics, loss_fn, args):
             
             calc_metrics = {'loss': loss}
             for m in metrics:
-                calc_metrics[m] = metrics[m](y, fp)
-            # for m in metrics:
-            #     wm = 'weighted_%s' % m
-            #     calc_metrics[wm] = 0
-            #     for i in range(args.batch_size):
-            #         calc_metrics[wm] += metrics[m](y[i].unsqueeze(0), fp[i].unsqueeze(0)) * w[i]
-            #     calc_metrics[wm] /= args.batch_size
+                r = metrics[m](y, fp)
+
+                # dict: multiple values
+                if type(r) is dict:
+                    calc_metrics.update(r)
+                else:
+                    calc_metrics[m] = r
             
             wandb.log(calc_metrics)
     
@@ -144,7 +144,16 @@ def train(model, run_path, train_dat, test_dat, metrics, loss_fn, args):
                 val_metrics['val_loss'] += loss
 
                 for m in metrics:
-                    val_metrics['val_%s' % m] += metrics[m](y, fp)
+                    r = metrics[m](y, fp)
+
+                    # dict: multiple values
+                    if type(r) is dict:
+                        calc_metrics.update({
+                            'val_%s' % k: r[k] for k in r
+                        })
+                    else:
+                        calc_metrics[m] = r
+
                 # for m in metrics:
                 #     wm = 'val_weighted_%s' % m
                 #     t = 0
