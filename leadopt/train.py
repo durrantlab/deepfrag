@@ -10,7 +10,7 @@ import tqdm
 import numpy as np
 
 from leadopt.data_util import FragmentDataset
-from leadopt.grid_util import get_batch, get_batch_dual, get_batch_full
+from leadopt.grid_util import get_batch
 from leadopt.metrics import tanimoto
 
 from config import partitions
@@ -51,7 +51,9 @@ def train(model, run_path, train_dat, test_dat, metrics, loss_fn, args):
             if args.weighted:
                 # weight by class frequency
                 t, fp, freq, _ = get_batch(
-                    train_dat, 
+                    train_dat,
+                    rec_channels=args.rec_channels,
+                    parent_channels=args.lig_channels,
                     batch_size=args.batch_size, 
                     width=args.grid_width, 
                     res=args.grid_res, 
@@ -63,6 +65,8 @@ def train(model, run_path, train_dat, test_dat, metrics, loss_fn, args):
             else:
                 t, fp, _ = get_batch(
                     train_dat, 
+                    rec_channels=args.rec_channels,
+                    parent_channels=args.lig_channels,
                     batch_size=args.batch_size, 
                     width=args.grid_width, 
                     res=args.grid_res, 
@@ -101,9 +105,8 @@ def train(model, run_path, train_dat, test_dat, metrics, loss_fn, args):
         model.eval()
         
         val_metrics = {'val_loss': 0}
-        for m in metrics:
-            val_metrics['val_%s' % m] = 0
-            # val_metrics['val_weighted_%s' % m] = 0
+        # for m in metrics:
+        #     val_metrics['val_%s' % m] = 0
         
         with torch.no_grad():
             for step in tqdm.tqdm(range(args.test_steps), desc='Val %d' % epoch):
@@ -112,7 +115,9 @@ def train(model, run_path, train_dat, test_dat, metrics, loss_fn, args):
                 if args.weighted:
                     # weight by class frequency
                     t, fp, freq, _ = get_batch(
-                        train_dat, 
+                        test_dat, 
+                        rec_channels=args.rec_channels,
+                        parent_channels=args.lig_channels,
                         batch_size=args.batch_size, 
                         width=args.grid_width, 
                         res=args.grid_res, 
@@ -123,7 +128,9 @@ def train(model, run_path, train_dat, test_dat, metrics, loss_fn, args):
                     w = (1 / freq)
                 else:
                     t, fp, _ = get_batch(
-                        train_dat, 
+                        test_dat, 
+                        rec_channels=args.rec_channels,
+                        parent_channels=args.lig_channels,
                         batch_size=args.batch_size, 
                         width=args.grid_width, 
                         res=args.grid_res, 
@@ -148,19 +155,18 @@ def train(model, run_path, train_dat, test_dat, metrics, loss_fn, args):
 
                     # dict: multiple values
                     if type(r) is dict:
-                        calc_metrics.update({
-                            'val_%s' % k: r[k] for k in r
-                        })
-                    else:
-                        calc_metrics[m] = r
+                        for h in r:
+                            mname = 'val_%s' % h
 
-                # for m in metrics:
-                #     wm = 'val_weighted_%s' % m
-                #     t = 0
-                #     for i in range(args.batch_size):
-                #         t += metrics[m](y[i].unsqueeze(0), fp[i].unsqueeze(0)) * w[i]
-                #     t /= args.batch_size
-                #     val_metrics[wm] += t
+                            if not mname in val_metrics:
+                                val_metrics[mname] = 0
+
+                            val_metrics[mname] += r[h]
+                    else:
+                        if not m in val_metrics:
+                            val_metrics[m] = 0
+
+                        val_metrics[m] += r
             
         val_metrics = {k:val_metrics[k]/args.test_steps for k in val_metrics}
         wandb.log(val_metrics)
@@ -170,7 +176,7 @@ def train(model, run_path, train_dat, test_dat, metrics, loss_fn, args):
             best_val_loss = val_metrics['val_loss']
             
             if args.save:
-                print('[*] Saving...')
+                print('[*] Saving...', flush=True)
                 torch.save(model.state_dict(), os.path.join(run_path, 'model_best.pt'))
 
 
@@ -238,7 +244,7 @@ def train_dual(model, run_path, train_dat, test_dat, metrics, loss_fn, args):
             for step in tqdm.tqdm(range(args.test_steps), desc='Val %d' % epoch):
                 # get batch
                 t, fp, yt, _  = get_batch_dual(
-                    train_dat, 
+                    test_dat, 
                     batch_size=args.batch_size, 
                     width=args.grid_width, 
                     res=args.grid_res, 

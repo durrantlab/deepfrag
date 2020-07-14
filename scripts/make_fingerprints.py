@@ -7,8 +7,8 @@ import h5py
 import numpy as np
 import tqdm
 
-import rdkit.Chem.AllChem as Chem
 from rdkit.Chem import rdMolDescriptors
+import rdkit.Chem.AllChem as Chem
 from rdkit.Chem.Pharm2D import Generate, Gobbi_Pharm2D
 
 

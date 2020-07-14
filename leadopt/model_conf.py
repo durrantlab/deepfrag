@@ -23,6 +23,7 @@ def denorm(f, std, mean):
 
     return g
 
+
 def within_k_mass(k):
     def g(yp, yt):
         return torch.mean((torch.abs(yp[:,0] - yt[:,0]) < k).to(torch.float))
@@ -248,6 +249,37 @@ def top_k_acc_mse(t_fingerprints, k, pre):
     return top_k_acc(t_fingerprints, fn, k, pre)
 
 
+def mse(yp, yt):
+    return torch.sum((yp - yt) ** 2, axis=1)
+
+def bce(yp, yt):
+    return torch.sum(F.binary_cross_entropy(yp,yt,reduction='none'), axis=1)
+
+def tanimoto(yp, yt):
+    intersect = torch.sum(yt * torch.round(yp), axis=1)
+    union = torch.sum(torch.clamp(yt + torch.round(yp), 0, 1), axis=1)
+    return 1 - (intersect / union)
+
+_cos = nn.CosineSimilarity(dim=1, eps=1e-6)
+def cos(yp, yt):
+    return 1 - _cos(yp,yt)
+
+def do_mean(fn):
+    def g(yp, yt):
+        return torch.mean(fn(yp,yt))
+    return g
+
+def _get_loss(loss, fingerprints):
+    if loss == 'mse': return do_mean(mse)
+    elif loss == 'bce': return do_mean(bce)
+    elif loss == 'tanimoto': return do_mean(tanimoto)
+    elif loss == 'cos': return do_mean(cos)
+
+    elif loss == 'mse_support': return average_support(fingerprints, mse)
+    elif loss == 'bce_support': return average_support(fingerprints, bce)
+    elif loss == 'tanimoto_support': return average_support(fingerprints, tanimoto)
+    elif loss == 'cos_support': return average_support(fingerprints, cos)
+
 class Model(object):
     def __init__(self):
         pass
@@ -277,6 +309,8 @@ class VoxelNet(Model):
         sub.add_argument('--fc', nargs='+', type=int, default=[2048])
 
         sub.add_argument('--use_all_labels', default=False, action='store_true')
+
+        sub.add_argument('--loss', default='mse_support')
 
     def build_model(self, args):
         m = VoxelFingerprintNet2b(
@@ -325,7 +359,8 @@ class VoxelNet(Model):
 
         fingerprints = train_dat.fingerprints['fingerprint_data'][all_fp]
 
-        loss_fn = average_support_mse(fingerprints)
+        # loss_fn = average_support_mse(fingerprints)
+        loss_fn = _get_loss(args.loss, fingerprints)
 
         return loss_fn
 

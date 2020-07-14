@@ -13,51 +13,8 @@ import h5py
 
 from leadopt.models.voxel import VoxelFingerprintNet2
 from leadopt.infer import infer_all
+from leadopt.pretrained import MODELS
 
-
-class SavedModel(object):
-    
-    model_class = None
-    model_args = None
-    
-    @classmethod
-    def load(cls, path):
-        m = cls.model_class(**cls.model_args).cuda()
-        m.load_state_dict(torch.load(path))
-        m.eval()
-        return m
-    
-    @classmethod
-    def get_fingerprints(cls, path):
-        f = h5py.File(os.path.join(path, cls.fingerprint_data), 'r')
-        
-        data = f['fingerprints'][()]
-        smiles = f['smiles'][()]
-        
-        f.close()
-        
-        return data, smiles
-    
-class V2_RDK_M150(SavedModel):
-    model_class = VoxelFingerprintNet2
-    model_args = {
-        'in_channels': 18,
-        'output_size': 2048,
-        'batchnorm': True,
-        'sigmoid': True
-    }
-    
-    grid_width=24
-    grid_res=1
-    receptor_types=[6,7,8,9,15,16,17,35,53]
-    parent_types=[6,7,8,9,15,16,17,35,53]
-    
-    fingerprint_data = 'fingerprint_rdk_2048.h5'
-
-
-MODELS = {
-    'rdk_m150': V2_RDK_M150
-}
 
 def main():
     parser = argparse.ArgumentParser()

@@ -9,7 +9,7 @@ import wandb
 import tqdm
 import numpy as np
 
-from leadopt.data_util import FragmentDataset
+from leadopt.data_util import FragmentDataset, REC_TYPER, LIG_TYPER
 
 from config import partitions
 
@@ -30,7 +30,6 @@ def main():
     parser.add_argument('-n', '--normalize_fingerprint', action='store_true', default=False)
 
     # training parameters
-    # parser.add_argument('-l', '--loss', choices=[k for k in LOSS], default='bce')
     parser.add_argument('-lr','--learning_rate',type=float,default=1e-4)
     parser.add_argument('--num_epochs',type=int,default=50)
     parser.add_argument('--test_steps',type=int,default=500)
@@ -50,6 +49,10 @@ def main():
     # receptor/parent options
     parser.add_argument('--ignore_receptor',action='store_true',default=False)
     parser.add_argument('--ignore_parent',action='store_true',default=False)
+    parser.add_argument('-rec_typer', required=True, choices=[k for k in REC_TYPER])
+    parser.add_argument('-lig_typer', required=True, choices=[k for k in LIG_TYPER])
+    parser.add_argument('-rec_channels', required=True, type=int)
+    parser.add_argument('-lig_channels', required=True, type=int)
 
     subparsers = parser.add_subparsers(dest='version')
 
@@ -79,21 +82,27 @@ def main():
     train_dat = FragmentDataset(
         args.fragments,
         args.fingerprints,
+        rec_typer=REC_TYPER[args.rec_typer],
+        lig_typer=LIG_TYPER[args.lig_typer],
         filter_rec=partitions.TRAIN, 
         fdist_min=args.fdist_min, 
         fdist_max=args.fdist_max, 
         fmass_min=args.fmass_min, 
-        fmass_max=args.fmass_max
+        fmass_max=args.fmass_max,
+        verbose=True
     )
 
     test_dat = FragmentDataset(
         args.fragments,
         args.fingerprints,
-        filter_rec=partitions.TEST, 
+        rec_typer=REC_TYPER[args.rec_typer],
+        lig_typer=LIG_TYPER[args.lig_typer],
+        filter_rec=partitions.VAL, 
         fdist_min=args.fdist_min, 
         fdist_max=args.fdist_max, 
         fmass_min=args.fmass_min, 
-        fmass_max=args.fmass_max
+        fmass_max=args.fmass_max,
+        verbose=True
     )
 
     # normalize by train data valid

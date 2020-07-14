@@ -1,8 +1,20 @@
 '''
-rdkit utility scripts
+rdkit/openbabel utility scripts
 '''
 from rdkit import Chem
 import numpy as np
+# import pybel
+from openbabel import pybel
+
+
+def get_coords(mol):
+    conf = mol.GetConformer()
+    coords = np.array([conf.GetAtomPosition(i) for i in range(conf.GetNumAtoms())])
+    return coords
+
+
+def get_types(mol):
+    return [mol.GetAtomWithIdx(i).GetAtomicNum() for i in range(mol.GetNumAtoms())]
 
 
 def combine_all(frags):
@@ -113,10 +125,38 @@ def load_receptor(rec_path):
     return rec
 
 
+def load_receptor_ob(rec_path):
+    rec = next(pybel.readfile('pdb', rec_path))
+    valid = [r for r in rec.residues if r.name != 'HOH']
+
+    # map partial charge into byte range
+    def conv_charge(x):
+        x = max(x,-0.5)
+        x = min(x,0.5)
+        x += 0.5
+        x *= 255
+        x = int(x)
+        return x
+
+    coords = []
+    types = []
+    for v in valid:
+        coords += [k.coords for k in v.atoms]
+        types += [(
+            k.atomicnum, 
+            int(k.OBAtom.IsAromatic()), 
+            int(k.OBAtom.IsHbondDonor()), 
+            int(k.OBAtom.IsHbondAcceptor()), 
+            conv_charge(k.OBAtom.GetPartialCharge())
+        ) for k in v.atoms]
+
+    return np.array(coords), np.array(types)
+
+
 def get_connection_point(frag):
     '''return the coordinates of the dummy atom as a numpy array [x,y,z]'''
-    dummy_idx = [k.GetAtomicNum() for k in frag.GetAtoms()].index(0)
-    coords = frag.GetConformer().GetPositions()[dummy_idx]
+    dummy_idx = get_types(frag).index(0)
+    coords = get_coords(frag)[dummy_idx]
     
     return coords
 
@@ -126,7 +166,17 @@ def frag_dist_to_receptor(rec, frag):
     rec_coords = rec.GetConformer().GetPositions()
     conn = get_connection_point(frag)
     
-    # compute pairwise distances
+    dist = np.sum((rec_coords - conn) ** 2, axis=1)
+    min_dist = np.sqrt(np.min(dist))
+    
+    return min_dist
+
+
+def frag_dist_to_receptor_raw(coords, frag):
+    '''compute the minimum distance between the fragment connection point any receptor atom'''
+    rec_coords = np.array(coords)
+    conn = get_connection_point(frag)
+    
     dist = np.sum((rec_coords - conn) ** 2, axis=1)
     min_dist = np.sqrt(np.min(dist))
     
@@ -135,18 +185,39 @@ def frag_dist_to_receptor(rec, frag):
 
 def mol_array(mol):
     '''convert an rdkit mol to an array of coordinates and atom types'''
-    coords = mol.GetConformer().GetPositions()
-    types = np.array([k.GetAtomicNum() for k in mol.GetAtoms()]).reshape(-1,1)
+    coords = get_coords(mol)
+    types = np.array(get_types(mol)).reshape(-1,1)
 
     arr = np.concatenate([coords, types], axis=1)
 
     return arr
 
 
+def desc_mol_array(mol, atom_fn):
+    '''user-defined atomic mapping function'''
+    coords = get_coords(mol)
+    atoms = list(mol.GetAtoms())
+    types = np.array([atom_fn(x) for x in atoms]).reshape(-1,1)
+
+    arr = np.concatenate([coords, types], axis=1)
+
+    return arr
+
+
+def desc_mol_array_ob(atoms, atom_fn):
+    coords = np.array([k[0] for k in atoms])
+    types = np.array([atom_fn(k[1]) for k in atoms]).reshape(-1,1)
+
+    # arr = np.concatenate([coords, types], axis=1)
+
+    return coords, types
+
+
 def mol_to_points(mol, atom_types=[6,7,8,9,15,16,17,35,53]):
     '''convert an rdkit mol to an array of coordinates and layers'''
-    coords = mol.GetConformer().GetPositions()
-    types = [k.GetAtomicNum() for k in mol.GetAtoms()]
+    coords = get_coords(mol)
+
+    types = get_types(mol)
     layers = np.array([(atom_types.index(k) if k in atom_types else -1) for k in types])
     
     # filter by existing layer
@@ -183,6 +254,59 @@ def merge_smiles(sma, smb):
 
     r = e.GetMol()
     
-    sm = Chem.MolToSmiles(Chem.RemoveHs(r, sanitize=False))
+    sm = Chem.MolToSmiles(Chem.RemoveHs(r, sanitize=False), isomericSmiles=False)
     
     return sm
+
+
+REPLACE = [
+    ('N=[C+](=N)=N', 'N=C(N)N'),
+    ('[C-](=O)=O', 'C(=O)O'),
+#     ('[NH2]', 'N'),
+    ('[C+](=N)=N', 'C(=N)N'),
+#     ('[c+](=N)', 'c(=N)'),
+    ('S(=O)(=O)=O', 'S(=O)(=O)O'),
+    ('C#O', 'C=O'),
+]
+
+def fix_smiles(sm):
+    m = Chem.MolFromSmiles(sm, sanitize=False)
+    
+    for a,b in REPLACE:
+        m = Chem.ReplaceSubstructs(
+            m,
+            Chem.MolFromSmiles(a, sanitize=False),
+            Chem.MolFromSmiles(b, sanitize=False),
+            replaceAll=True
+        )[0]
+        
+    m.UpdatePropertyCache(strict=False)
+    
+    for atom in m.GetAtoms():
+        # handle tetravalent nitrogen
+        if atom.GetAtomicNum() == 7 and atom.GetExplicitValence() == 4:
+            atom.SetFormalCharge(1)
+            
+        if atom.GetAtomicNum() == 6 and atom.GetFormalCharge() == 1:
+            atom.SetFormalCharge(0)
+            
+        if atom.GetAtomicNum() == 6 and atom.GetFormalCharge() == -1:
+            atom.SetFormalCharge(0)
+            
+        if atom.GetAtomicNum() == 7 and atom.GetExplicitValence() == 5:
+            atom.SetNumExplicitHs(0)
+            
+        if atom.GetAtomicNum() == 7 and atom.GetExplicitValence() == 6:
+            atom.SetNumExplicitHs(0)
+            atom.SetFormalCharge(1)
+            
+        if atom.GetAtomicNum() == 7 and atom.GetExplicitValence() == 3 and atom.GetNumExplicitHs() == 0 and atom.GetIsAromatic() == True:
+            atom.SetFormalCharge(1)
+            
+    h = m
+    try:
+        Chem.SanitizeMol(m)
+    except:
+        return None
+    
+    return Chem.MolToSmiles(m)

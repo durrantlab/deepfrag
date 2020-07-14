@@ -19,6 +19,26 @@ sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), os.par
 from leadopt import util
 
 
+def rec_fn(atom):
+    '''receptor atom type mapping'''
+    num = atom.GetAtomicNum()
+    aromatic = int(atom.GetIsAromatic())
+    
+    return (aromatic << 8) + (num)
+
+def rec_fn_ob(atom):
+    num = atom[0]
+
+    aromatic = int(atom[1])
+    hdon = int(atom[2])
+    hacc = int(atom[3])
+    meta = aromatic + (hdon << 1) + (hacc << 2)
+
+    charge = atom[4]
+    
+    return (charge << 16) + (meta << 8) + (num)
+
+
 def load_example(path, prot_id):
     '''
     load a single protein/ligand pair example
@@ -28,10 +48,18 @@ def load_example(path, prot_id):
     
     # load ligand and receptor
     lig, frags = util.load_ligand(lig_path)
-    rec = util.load_receptor(rec_path)
+
+    # rdkit
+    # rec = util.load_receptor(rec_path)
+
+    # openbabel
+    rec = util.load_receptor_ob(rec_path)
     
     # convert to a list of atom coordinates
-    rec_data = util.mol_array(rec)
+    # rec_data = util.mol_array(rec)
+    # Chem.SanitizeMol(rec)
+    # rec_data = util.desc_mol_array(rec, rec_fn)
+    rec_data = util.desc_mol_array_ob(rec, rec_fn_ob)
     
     fragments = [] # (frag_data, parent_data, smiles, mass, dist)
     for parent, frag in frags:
@@ -44,7 +72,8 @@ def load_example(path, prot_id):
         frag.UpdatePropertyCache(strict=False)
         mass = ExactMolWt(frag)
         
-        dist = util.frag_dist_to_receptor(rec, frag)
+        # dist = util.frag_dist_to_receptor(rec, frag)
+        dist = util.frag_dist_to_receptor_ob(rec, frag)
         
         fragments.append((frag_data, parent_data, smiles, mass, dist))
         

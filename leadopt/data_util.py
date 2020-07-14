@@ -8,28 +8,161 @@ import os
 from torch.utils.data import DataLoader, Dataset
 import numpy as np
 import h5py
+import tqdm
 
 
-# Default atomic numbers to use as grid layers
-DEFAULT_TYPES = [6,7,8,9,15,16,17,35,53]
 
 
-def remap_atoms(atom_types):
-    '''
-    Returns a function that maps an atomic number to layer index.
-
-    Params:
-    - atom_types: which atom types to use as layers
-    '''
-    atom_mapping = {atom_types[i]:i for i in range(len(atom_types))}
+def rec_typer_single(t):
+    '''single channel no hydrogen'''
+    # unpack features
+    num, hacc, hdon, aro, _ = t
     
-    def f(x):
-        if x in atom_mapping:
-            return atom_mapping[x]
-        else:
-            return -1
+    if num != 1:
+        return 0
+    else:
+        return -1
     
-    return f
+def rec_typer_single_h(t):
+    '''single channel with hydrogen'''
+    # unpack features
+    return 0
+    
+def rec_typer_basic(t):
+    '''simple types'''
+    BASIC_TYPES = [6,7,8,16]
+    num, hacc, hdon, aro, _ = t
+    
+    if num in BASIC_TYPES:
+        return BASIC_TYPES.index(num)
+    else:
+        return -1
+    
+def rec_typer_basic_h(t):
+    '''simple types with hydrogen'''
+    BASIC_TYPES = [1,6,7,8,16]
+    num, hacc, hdon, aro, _ = t
+    
+    if num in BASIC_TYPES:
+        return BASIC_TYPES.index(num)
+    else:
+        return -1
+
+# aro, hdon, hacc
+REC_DESC = [
+    (6,0,0,0), # C
+    (6,1,0,0), # C-aro
+    (7,0,0,0), # N
+    (7,0,0,1), # N-hacc
+    (7,0,1,0), # N-hdon
+    (7,1,0,0), # N-aro
+    (7,0,1,1), # N-hdon-hacc
+    (7,1,0,1), # N-aro-hacc
+    (7,1,1,0), # N-aro-hdon
+    (8,0,0,0), # O
+    (8,0,0,1), # O-hacc
+    (8,0,1,1), # O-hdon-hacc
+    (16,0,0,0), #S
+]
+
+REC_DESC_H = [
+    (1,0,0,0), # H
+    (6,0,0,0), # C
+    (6,1,0,0), # C-hacc
+    (7,0,0,0), # N
+    (7,0,0,1), # N-aro
+    (7,0,1,0), # N-hdon
+    (7,1,0,0), # N-hacc
+    (7,0,1,1), # N-hdon-aro
+    (7,1,0,1), # N-hacc-aro
+    (7,1,1,0), # N-hacc-hdon
+    (8,0,0,0), # O
+    (8,0,0,1), # O-aro
+    (8,0,1,1), # O-hdon-aro
+    (16,0,0,0), #S
+]
+    
+def rec_typer_desc(t):
+    '''descriptive types'''
+    num, hacc, hdon, aro, _ = t
+    
+    f = (num,hacc,hdon,aro)
+    
+    if f in REC_DESC:
+        return REC_DESC.index(f)
+    else:
+        return -1
+    
+def rec_typer_desc_h(t):
+    '''descriptive types'''
+    num, hacc, hdon, aro, _ = t
+    
+    f = (num,hacc,hdon,aro)
+    
+    if f in REC_DESC_H:
+        return REC_DESC_H.index(f)
+    else:
+        return -1
+    
+def lig_typer_single(t):
+    if t != 1:
+        return 0
+    else:
+        return -1
+
+def lig_typer_single_h(t):
+    return 0
+
+def lig_typer_simple(t):
+    BASIC_TYPES = [6,7,8]
+    
+    if t in BASIC_TYPES:
+        return BASIC_TYPES.index(t)
+    else:
+        return -1
+    
+def lig_typer_simple_h(t):
+    BASIC_TYPES = [1,6,7,8]
+    
+    if t in BASIC_TYPES:
+        return BASIC_TYPES.index(t)
+    else:
+        return -1
+    
+def lig_typer_desc(t):
+    DESC_TYPES = [6,7,8,16,9,15,17,35,5,53]
+    
+    if t in DESC_TYPES:
+        return DESC_TYPES.index(t)
+    else:
+        return -1
+    
+def lig_typer_desc_h(t):
+    DESC_TYPES = [1,6,7,8,16,9,15,17,35,5,53]
+    
+    if t in DESC_TYPES:
+        return DESC_TYPES.index(t)
+    else:
+        return -1
+
+
+REC_TYPER = {
+    'single': rec_typer_single,
+    'single_h': rec_typer_single_h,
+    'simple': rec_typer_basic,
+    'simple_h': rec_typer_basic_h,
+    'desc': rec_typer_desc,
+    'desc_h': rec_typer_desc_h
+}
+
+LIG_TYPER = {
+    'single': lig_typer_single,
+    'single_h': lig_typer_single_h,
+    'simple': lig_typer_simple,
+    'simple_h': lig_typer_simple_h,
+    'desc': lig_typer_desc,
+    'desc_h': lig_typer_desc_h
+}
 
 
 class FragmentDataset(Dataset):
@@ -37,15 +170,17 @@ class FragmentDataset(Dataset):
     Utility class to work with the packed fragments.h5 format
     '''
     
-    def __init__(self, fragment_file, fingerprint_file, filter_rec=None, atom_types=DEFAULT_TYPES, fdist_min=None, fdist_max=None, fmass_min=None, fmass_max=None):
+    def __init__(self, fragment_file, fingerprint_file, rec_typer, lig_typer, filter_rec=None, 
+        fdist_min=None, fdist_max=None, fmass_min=None, fmass_max=None, verbose=False):
         '''
         Initialize the fragment dataset
         
         Params:
         - fragment_file: path to fragments.h5
         - fingerprint_file: path to fingerprints.h5
+        - rec_typer: function to map receptor rows to layer index
+        - lig_typer: function to map ligand rows to layer index
         - filter_rec: list of receptor ids to use (or None to use all)
-        - atom_types: which atom types to use as layers
 
         Filtering options:
         - fdist_min: minimum fragment distance
@@ -53,9 +188,11 @@ class FragmentDataset(Dataset):
         - fmass_min: minimum fragment mass (Da)
         - fmass_max: maximum fragment mass (Da)
         '''
+        self.verbose = verbose
+
         #  load receptor/fragment information
-        self.rec = self.load_rec(fragment_file, atom_types)
-        self.frag = self.load_fragments(fragment_file, atom_types)
+        self.rec = self.load_rec(fragment_file, rec_typer)
+        self.frag = self.load_fragments(fragment_file, lig_typer)
 
         # load fingerprint information
         self.fingerprints = self.load_fingerprints(fingerprint_file)
@@ -91,19 +228,22 @@ class FragmentDataset(Dataset):
 
         self.valid_fingerprints = self.compute_valid_fingerprints()
 
-    def load_rec(self, fragment_file, atom_types):
+    def load_rec(self, fragment_file, rec_typer):
         '''Load receptor information'''
         f = h5py.File(fragment_file, 'r')
         
-        rec_data = f['rec_data'][()]
+        rec_coords = f['rec_coords'][()]
+        rec_types = f['rec_types'][()]
         rec_lookup = f['rec_lookup'][()]
         
-        # unpack rec data into separate structures
-        rec_coords = rec_data[:,:3].astype(np.float32)
-        rec_types = rec_data[:,3].reshape(-1,1).astype(np.int32)
-        
-        rec_remapped = np.vectorize(remap_atoms(atom_types))(rec_types)
-        
+        r = range(len(rec_types))
+        if self.verbose:
+            r = tqdm.tqdm(r, desc='Remap receptor atoms')
+
+        rec_remapped = np.zeros(len(rec_types)).astype(np.int32)
+        for i in r:
+            rec_remapped[i] = rec_typer(rec_types[i])
+
         # create rec mapping
         rec_mapping = {}
         for i in range(len(rec_lookup)):
@@ -121,7 +261,7 @@ class FragmentDataset(Dataset):
         
         return rec
         
-    def load_fragments(self, fragment_file, atom_types):
+    def load_fragments(self, fragment_file, lig_typer):
         '''Load fragment information'''
 
         f = h5py.File(fragment_file, 'r')
@@ -134,13 +274,17 @@ class FragmentDataset(Dataset):
         
         # unpack frag data into separate structures
         frag_coords = frag_data[:,:3].astype(np.float32)
-        frag_types = frag_data[:,3].reshape(-1,1).astype(np.int32)
+        frag_types = frag_data[:,3].astype(np.int32)
         
-        frag_remapped = np.vectorize(remap_atoms(atom_types))(frag_types)
+        frag_remapped = np.vectorize(lig_typer)(frag_types)
         
         # find and save connection point
+        r = range(len(frag_lookup))
+        if self.verbose:
+            r = tqdm.tqdm(r, desc='Frag connection point')
+
         frag_conn = np.zeros((len(frag_lookup), 3))
-        for i in range(len(frag_lookup)):
+        for i in r:
             _,f_start,f_end,_,_ = frag_lookup[i]
             fdat = frag_data[f_start:f_end]
             

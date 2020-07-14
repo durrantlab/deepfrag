@@ -1,7 +1,7 @@
 
-# Lead Optimization via Fragment Prediction
+# Lead Optimization
 
-# Overview
+# Structure
 
 - `config`: configuration information (eg. TRAIN/TEST partitions)
 - `data`: training/inference data (see [`data/README.md`](data/README.md))

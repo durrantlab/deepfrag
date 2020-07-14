@@ -67,7 +67,8 @@ def gpu_gridify(grid, width, res, center, rot, atom_num, atom_coords, atom_types
     while i < atom_num:
         # fetch atom
         fx, fy, fz = atom_coords[i]
-        ft = atom_types[i][0]
+        # ft = atom_types[i][0]
+        ft = atom_types[i]
         i += 1
         
         # invisible atoms
@@ -152,13 +153,15 @@ def mol_gridify(
     )
     
 
-def get_batch(data, batch_set=None, batch_size=16, width=48, res=0.5, ignore_receptor=False, ignore_parent=False, include_freq=False):
+def get_batch(data, rec_channels, parent_channels, batch_set=None, batch_size=16, width=48, res=0.5, ignore_receptor=False, ignore_parent=False, include_freq=False):
     
     assert (not (ignore_receptor and ignore_parent)), "Can't ignore parent and receptor!"
 
-    dim = 18
-    if ignore_receptor or ignore_parent:
-        dim = 9
+    dim = 0
+    if not ignore_receptor:
+        dim += rec_channels
+    if not ignore_parent:
+        dim += parent_channels
 
     # create a tensor with shared memory on the gpu
     t, grid = make_tensor((batch_size, dim, width, width, width))
@@ -182,7 +185,7 @@ def get_batch(data, batch_set=None, batch_size=16, width=48, res=0.5, ignore_rec
             mol_gridify(grid, r_coords, r_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
         else:
             mol_gridify(grid, p_coords, p_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
-            mol_gridify(grid, r_coords, r_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=9)
+            mol_gridify(grid, r_coords, r_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=parent_channels)
         
         fingerprints[i] = fp
         freq[i] = extra['freq']
@@ -196,63 +199,63 @@ def get_batch(data, batch_set=None, batch_size=16, width=48, res=0.5, ignore_rec
         return t, t_fingerprints, batch_set
 
 
-def get_batch_dual(data, batch_set=None, batch_size=16, width=48, res=0.5, ignore_receptor=False, ignore_parent=False):
+# def get_batch_dual(data, batch_set=None, batch_size=16, width=48, res=0.5, ignore_receptor=False, ignore_parent=False):
 
-    # get batch
-    t, fp, batch_set = get_batch(data, batch_set, batch_size, width, res, ignore_receptor, ignore_parent)
+#     # get batch
+#     t, fp, batch_set = get_batch(data, batch_set, batch_size, width, res, ignore_receptor, ignore_parent)
 
-    f = data.fingerprints['fingerprint_data']
+#     f = data.fingerprints['fingerprint_data']
 
-    # corrupt fingerprints
-    false_fp = torch.clone(fp)
-    for i in range(batch_size):
-        # idx = np.random.randint(fp.shape[1])
-        # false_fp[i,idx] = (1 - false_fp[i,idx]) # flip
-        idx = np.random.randint(f.shape[0])
-        false_fp[i] = torch.Tensor(f[idx]) # replace
+#     # corrupt fingerprints
+#     false_fp = torch.clone(fp)
+#     for i in range(batch_size):
+#         # idx = np.random.randint(fp.shape[1])
+#         # false_fp[i,idx] = (1 - false_fp[i,idx]) # flip
+#         idx = np.random.randint(f.shape[0])
+#         false_fp[i] = torch.Tensor(f[idx]) # replace
 
-    comb_t = torch.cat([t,t], axis=0)
-    comb_fp = torch.cat([fp, false_fp], axis=0)
+#     comb_t = torch.cat([t,t], axis=0)
+#     comb_fp = torch.cat([fp, false_fp], axis=0)
 
-    y = torch.zeros((batch_size * 2,1)).cuda()
-    y[:batch_size] = 1
+#     y = torch.zeros((batch_size * 2,1)).cuda()
+#     y[:batch_size] = 1
 
-    return (comb_t, comb_fp, y, batch_set)
+#     return (comb_t, comb_fp, y, batch_set)
 
 
-def get_batch_full(data, batch_set=None, batch_size=16, width=48, res=0.5, ignore_receptor=False, ignore_parent=False):
+# def get_batch_full(data, batch_set=None, batch_size=16, width=48, res=0.5, ignore_receptor=False, ignore_parent=False):
     
-    assert (not (ignore_receptor and ignore_parent)), "Can't ignore parent and receptor!"
+#     assert (not (ignore_receptor and ignore_parent)), "Can't ignore parent and receptor!"
 
-    dim = 18
-    if ignore_receptor or ignore_parent:
-        dim = 9
+#     dim = 18
+#     if ignore_receptor or ignore_parent:
+#         dim = 9
 
-    # create a tensor with shared memory on the gpu
-    t_context, grid_context = make_tensor((batch_size, dim, width, width, width))
-    t_frag, grid_frag = make_tensor((batch_size, 9, width, width, width))
+#     # create a tensor with shared memory on the gpu
+#     t_context, grid_context = make_tensor((batch_size, dim, width, width, width))
+#     t_frag, grid_frag = make_tensor((batch_size, 9, width, width, width))
     
-    if batch_set is None:
-        batch_set = np.random.choice(len(data), size=batch_size, replace=False)
+#     if batch_set is None:
+#         batch_set = np.random.choice(len(data), size=batch_size, replace=False)
     
-    for i in range(len(batch_set)):
-        idx = batch_set[i]
-        f_coords, f_types, p_coords, p_types, r_coords, r_types, conn, fp = data[idx]
+#     for i in range(len(batch_set)):
+#         idx = batch_set[i]
+#         f_coords, f_types, p_coords, p_types, r_coords, r_types, conn, fp = data[idx]
         
-        # random rotation
-        rot = rand_rot()
+#         # random rotation
+#         rot = rand_rot()
         
-        if ignore_receptor:
-            mol_gridify(grid_context, p_coords, p_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
-        elif ignore_parent:
-            mol_gridify(grid_context, r_coords, r_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
-        else:
-            mol_gridify(grid_context, p_coords, p_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
-            mol_gridify(grid_context, r_coords, r_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=9)
+#         if ignore_receptor:
+#             mol_gridify(grid_context, p_coords, p_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
+#         elif ignore_parent:
+#             mol_gridify(grid_context, r_coords, r_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
+#         else:
+#             mol_gridify(grid_context, p_coords, p_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
+#             mol_gridify(grid_context, r_coords, r_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=9)
         
-        mol_gridify(grid_frag, f_coords, f_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
+#         mol_gridify(grid_frag, f_coords, f_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
 
-    return t_context, t_frag, batch_set
+#     return t_context, t_frag, batch_set
 
 
 def get_raw_batch(r_coords, r_types, p_coords, p_types, conn, num_samples=32, width=24, res=1, r_dim=9, p_dim=9):
