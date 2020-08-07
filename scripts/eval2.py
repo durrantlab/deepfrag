@@ -6,6 +6,8 @@ sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), os.par
 import argparse
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from leadopt import data_util
 from config import partitions
@@ -30,6 +32,29 @@ import tqdm
 
 # IGNORE_REC = False
 # IGNORE_PARENT = False
+
+def mse(yp, yt):
+    return torch.sum((yp - yt) ** 2, axis=1)
+
+def bce(yp, yt):
+    return torch.sum(F.binary_cross_entropy(yp,yt,reduction='none'), axis=1)
+
+def tanimoto(yp, yt):
+    intersect = torch.sum(yt * torch.round(yp), axis=1)
+    union = torch.sum(torch.clamp(yt + torch.round(yp), 0, 1), axis=1)
+    return 1 - (intersect / union)
+
+_cos = nn.CosineSimilarity(dim=1, eps=1e-6)
+def cos(yp, yt):
+    return 1 - _cos(yp,yt)
+
+
+DIST_METRIC = {
+    'mse': mse,
+    'bce': bce,
+    'tanimoto': tanimoto,
+    'cos': cos
+}
 
 
 def run():
@@ -58,6 +83,9 @@ def run():
     parser.add_argument('-rec_channels', required=True, type=int)
     parser.add_argument('-lig_channels', required=True, type=int)
 
+    # dist
+    parser.add_argument('-dist',default='mse')
+
     # model file
     parser.add_argument('-model')
 
@@ -85,6 +113,8 @@ def evaluate(args, model, data, fpdat, idx):
         include_freq=True,
         batch_set=[idx]
     )
+
+    dist_fn = DIST_METRIC[args.dist]
     
     # true index
     fp_idx = int(torch.where(mse(fp.cpu(), fpdat)==0)[0][0].numpy())
@@ -92,7 +122,7 @@ def evaluate(args, model, data, fpdat, idx):
     with torch.no_grad():
         p = model(t).cpu()
         
-    dist = mse(p, fpdat).numpy()
+    dist = dist_fn(p, fpdat).numpy()
     
     return fp_idx, dist
 

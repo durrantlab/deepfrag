@@ -1,8 +1,6 @@
-'''
-grid_util.py
-
-contains code for gpu-accelerated grid generation
-'''
+"""
+Contains code for gpu-accelerated grid generation.
+"""
 
 import math
 import ctypes
@@ -17,12 +15,46 @@ GPU_DIM = 8
 
 
 @numba.cuda.jit
-def gpu_gridify(grid, width, res, center, rot, atom_num, atom_coords, atom_types, layer_offset, batch_i):
-    '''
-    GPU kernel to add atoms to a grid
+def gpu_gridify(grid, atom_num, atom_coords, atom_layers, layer_offset,
+                batch_idx, width, res, center, rot):
+    """Adds atoms to the grid in a GPU kernel.
     
-    width, res, offset and rot control the grid view
-    '''
+    This kernel converts atom coordinate information to 3d voxel information.
+    Each GPU thread is responsible for one specific grid point. This function
+    receives a list of atomic coordinates and atom layers and simply iterates
+    over the list to find nearby atoms and add their effect.
+
+    Voxel information is stored in a 5D tensor of type: BxTxNxNxN where:
+        B = batch size
+        T = number of atom types (receptor + ligand)
+        N = grid width (in gridpoints)
+
+    Each invocation of this function will write information to a specific batch
+    index specified by batch_idx. Additionally, the layer_offset parameter can
+    be set to specify a fixed offset to add to each atom_layer item.
+
+    How it works:
+    1. Each GPU thread controls a single gridpoint. This gridpoint coordinate
+        is translated to a "real world" coordinate by applying rotation and
+        translation vectors.
+    2. Each thread iterates over the list of atoms and checks for atoms within
+        a threshold to add to the grid.
+
+    Args:
+        grid: DeviceNDArray tensor where grid information is stored
+        atom_num: number of atoms
+        atom_coords: array containing (x,y,z) atom coordinates
+        atom_layers: array containing (idx) offsets that specify which layer to
+            store this atom. (-1 can be used to ignore an atom)
+        layer_offset: a fixed ofset added to each atom layer index
+        batch_idx: index specifiying which batch to write information to
+        width: number of grid points in each dimension
+        res: distance between neighboring grid points in angstroms
+            (1 == gridpoint every angstrom)
+            (0.5 == gridpoint every half angstrom, e.g. tighter grid)
+        center: (x,y,z) coordinate of grid center
+        rot: (x,y,z,y) rotation quaternion
+    """
     x,y,z = numba.cuda.grid(3)
     
     # center around origin
@@ -67,17 +99,17 @@ def gpu_gridify(grid, width, res, center, rot, atom_num, atom_coords, atom_types
     while i < atom_num:
         # fetch atom
         fx, fy, fz = atom_coords[i]
-        # ft = atom_types[i][0]
-        ft = atom_types[i]
+        ft = atom_layers[i]
         i += 1
         
         # invisible atoms
         if ft == -1:
             continue
         
+        # fixed radius (^2)
         r2 = 4
         
-        # exit early
+        # quick cube bounds check
         if abs(fx-tx) > r2 or abs(fy-ty) > r2 or abs(fz-tz) > r2:
             continue
         
@@ -89,13 +121,31 @@ def gpu_gridify(grid, width, res, center, rot, atom_num, atom_coords, atom_types
         
         # add effect
         if d2 < r2:
-            grid[batch_i,layer_offset+ft,x,y,z] += v
+            grid[batch_idx, layer_offset+ft, x, y, z] += v
+
+
+def mol_gridify(grid, atom_coords, atom_layers, layer_offset, batch_idx,
+                width, res, center, rot):
+    """Wrapper around gpu_gridify.
+    
+    (See gpu_gridify() for details)
+    """
+    dw = ((width - 1) // GPU_DIM) + 1
+    gpu_gridify[(dw,dw,dw), (GPU_DIM,GPU_DIM,GPU_DIM)](
+        grid, len(atom_coords), atom_coords, atom_layers, layer_offset,
+        batch_idx, width, res, center, rot
+    )
 
 
 def make_tensor(shape):
-    '''
-    Create a pytorch tensor and numba array with the same GPU memory backing
-    '''
+    """Creates a pytorch tensor and numba array with shared GPU memory backing.
+
+    Args:
+        shape: the shape of the array
+
+    Returns:
+        (torch_arr, cuda_arr)
+    """
     # get cuda context
     ctx = numba.cuda.cudadrv.driver.driver.get_active_context()
     
@@ -115,46 +165,32 @@ def make_tensor(shape):
         
 
 def rand_rot():
-    '''
-    Sample a random 3d rotation from a uniform distribution
-    
-    Returns a quaternion vector (w,x,y,z)
-    '''
+    """Returns a random uniform quaternion rotation."""
     q = np.random.normal(size=4) # sample quaternion from normal distribution
     q = q / np.sqrt(np.sum(q**2)) # normalize
     return q
-
-
-def mol_gridify(
-    grid,
-    mol_atoms, 
-    mol_types, 
-    batch_i,
-    center=np.array([0,0,0]),
-    width=48, 
-    res=0.5,
-    rot=np.array([1,0,0,0]),
-    layer_offset=0,
-    ):
-    '''wrapper to invoke gpu gridify kernel'''
-    dw = ((width - 1) // GPU_DIM) + 1
-    
-    gpu_gridify[(dw,dw,dw), (GPU_DIM,GPU_DIM,GPU_DIM)](
-        grid, 
-        width, 
-        res, 
-        center,
-        rot,
-        len(mol_atoms), 
-        mol_atoms,
-        mol_types,
-        layer_offset,
-        batch_i
-    )
     
 
-def get_batch(data, rec_channels, parent_channels, batch_set=None, batch_size=16, width=48, res=0.5, ignore_receptor=False, ignore_parent=False, include_freq=False):
-    
+def get_batch(data, rec_channels, parent_channels, batch_size=16, batch_set=None,
+              width=48, res=0.5, ignore_receptor=False, ignore_parent=False):
+    """Builds a batch grid from a FragmentDataset.
+
+    Args:
+        data: a FragmentDataset object
+        rec_channels: number of receptor channels
+        parent_channels: number of parent channels
+        batch_size: size of the batch
+        batch_set: if not None, specify a list of data indexes to use for each
+            item in the batch
+        width: grid width
+        res: grid resolution
+        ignore_receptor: if True, ignore receptor atoms
+        ignore_parent: if True, ignore parent atoms
+
+    Returns: (torch_grid, batch_set)
+        torch_grid: pytorch Tensor with voxel information
+        examples: list of examples used
+    """
     assert (not (ignore_receptor and ignore_parent)), "Can't ignore parent and receptor!"
 
     dim = 0
@@ -164,110 +200,94 @@ def get_batch(data, rec_channels, parent_channels, batch_set=None, batch_size=16
         dim += parent_channels
 
     # create a tensor with shared memory on the gpu
-    t, grid = make_tensor((batch_size, dim, width, width, width))
+    torch_grid, cuda_grid = make_tensor((batch_size, dim, width, width, width))
     
     if batch_set is None:
         batch_set = np.random.choice(len(data), size=batch_size, replace=False)
     
-    fingerprints = np.zeros((batch_size, data.fingerprints['fingerprint_data'].shape[1]))
-    freq = np.zeros(batch_size)
-    
-    for i in range(len(batch_set)):
-        idx = batch_set[i]
-        f_coords, f_types, p_coords, p_types, r_coords, r_types, conn, fp, extra = data[idx]
-        
-        # random rotation
+    examples = [data[idx] for idx in batch_set]
+
+    for i in range(len(examples)):
+        example = examples[i]
         rot = rand_rot()
         
         if ignore_receptor:
-            mol_gridify(grid, p_coords, p_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
+            mol_gridify(
+                cuda_grid,
+                example['p_coords'],
+                example['p_types'],
+                layer_offset=0,
+                batch_idx=i,
+                width=width,
+                res=res,
+                center=example['conn'],
+                rot=rot
+            )
         elif ignore_parent:
-            mol_gridify(grid, r_coords, r_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
+            mol_gridify(
+                cuda_grid,
+                example['r_coords'],
+                example['r_types'],
+                layer_offset=0,
+                batch_idx=i,
+                width=width,
+                res=res,
+                center=example['conn'],
+                rot=rot
+            )
         else:
-            mol_gridify(grid, p_coords, p_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
-            mol_gridify(grid, r_coords, r_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=parent_channels)
+            mol_gridify(
+                cuda_grid, 
+                example['p_coords'],
+                example['p_types'],
+                layer_offset=0,
+                batch_idx=i,
+                width=width,
+                res=res,
+                center=example['conn'],
+                rot=rot
+            )
+            mol_gridify(
+                cuda_grid,
+                example['r_coords'],
+                example['r_types'],
+                layer_offset=parent_channels,
+                batch_idx=i,
+                width=width,
+                res=res,
+                center=example['conn'],
+                rot=rot
+            )
         
-        fingerprints[i] = fp
-        freq[i] = extra['freq']
-        
-    t_fingerprints = torch.Tensor(fingerprints).cuda()
-    t_freq = torch.Tensor(freq).cuda()
-    
-    if include_freq:
-        return t, t_fingerprints, t_freq, batch_set
-    else:
-        return t, t_fingerprints, batch_set
+    return torch_grid, examples
 
 
-# def get_batch_dual(data, batch_set=None, batch_size=16, width=48, res=0.5, ignore_receptor=False, ignore_parent=False):
+def get_raw_batch(r_coords, r_types, p_coords, p_types, conn, num_samples=32,
+                  width=24, res=1, rec_channels=9, parent_channels=9):
+    """Sample a raw batch with provided atom coordinates.
 
-#     # get batch
-#     t, fp, batch_set = get_batch(data, batch_set, batch_size, width, res, ignore_receptor, ignore_parent)
-
-#     f = data.fingerprints['fingerprint_data']
-
-#     # corrupt fingerprints
-#     false_fp = torch.clone(fp)
-#     for i in range(batch_size):
-#         # idx = np.random.randint(fp.shape[1])
-#         # false_fp[i,idx] = (1 - false_fp[i,idx]) # flip
-#         idx = np.random.randint(f.shape[0])
-#         false_fp[i] = torch.Tensor(f[idx]) # replace
-
-#     comb_t = torch.cat([t,t], axis=0)
-#     comb_fp = torch.cat([fp, false_fp], axis=0)
-
-#     y = torch.zeros((batch_size * 2,1)).cuda()
-#     y[:batch_size] = 1
-
-#     return (comb_t, comb_fp, y, batch_set)
-
-
-# def get_batch_full(data, batch_set=None, batch_size=16, width=48, res=0.5, ignore_receptor=False, ignore_parent=False):
-    
-#     assert (not (ignore_receptor and ignore_parent)), "Can't ignore parent and receptor!"
-
-#     dim = 18
-#     if ignore_receptor or ignore_parent:
-#         dim = 9
-
-#     # create a tensor with shared memory on the gpu
-#     t_context, grid_context = make_tensor((batch_size, dim, width, width, width))
-#     t_frag, grid_frag = make_tensor((batch_size, 9, width, width, width))
-    
-#     if batch_set is None:
-#         batch_set = np.random.choice(len(data), size=batch_size, replace=False)
-    
-#     for i in range(len(batch_set)):
-#         idx = batch_set[i]
-#         f_coords, f_types, p_coords, p_types, r_coords, r_types, conn, fp = data[idx]
-        
-#         # random rotation
-#         rot = rand_rot()
-        
-#         if ignore_receptor:
-#             mol_gridify(grid_context, p_coords, p_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
-#         elif ignore_parent:
-#             mol_gridify(grid_context, r_coords, r_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
-#         else:
-#             mol_gridify(grid_context, p_coords, p_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
-#             mol_gridify(grid_context, r_coords, r_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=9)
-        
-#         mol_gridify(grid_frag, f_coords, f_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
-
-#     return t_context, t_frag, batch_set
-
-
-def get_raw_batch(r_coords, r_types, p_coords, p_types, conn, num_samples=32, width=24, res=1, r_dim=9, p_dim=9):
-    
-    # create a tensor with shared memory on the gpu
-    t, grid = make_tensor((num_samples, (r_dim + p_dim), width, width, width))
+    Args:
+        r_coords: receptor coordinates
+        r_types: receptor types (layers)
+        p_coords: parent coordinates
+        p_types: parent types (layers)
+        conn: (x,y,z) connection point
+        num_samples: number of rotations to sample
+        width: grid width
+        res: grid resolution
+        rec_channels: number of receptor channels
+        parent_channels: number of parent chanels
+    """
+    B = num_samples
+    T = rec_channels + parent_channels
+    N = width
+    torch_grid, cuda_grid = make_tensor((B,T,N,N,N))
     
     for i in range(num_samples):
-        # random rotation
         rot = rand_rot()
+        mol_gridify(cuda_grid, p_coords, p_types, layer_offset=0, batch_idx=i,
+                        width=width, res=res, center=conn, rot=rot)
+        mol_gridify(cuda_grid, r_coords, r_types, layer_offset=p_dim, batch_idx=i,
+                        width=width, res=res, center=conn, rot=rot)
         
-        mol_gridify(grid, p_coords, p_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=0)
-        mol_gridify(grid, r_coords, r_types, batch_i=i, center=conn, width=width, res=res, rot=rot, layer_offset=p_dim)
-        
-    return t
+    return torch_grid

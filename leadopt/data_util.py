@@ -1,21 +1,27 @@
-'''
-data_util.py
-
-contains utility code for reading packed training data
-'''
+"""
+Contains utility code for reading packed data files.
+"""
 import os
 
+import torch
 from torch.utils.data import DataLoader, Dataset
 import numpy as np
 import h5py
 import tqdm
 
-
-
+# Atom typing
+# 
+# Atom typing is the process of figuring out which layer each atom should be
+# written to. For ease of testing, the packed data file contains a lot of
+# potentially useful atomic information which can be distilled during the
+# data loading process.
+# 
+# Atom typing is implemented by map functions of the type:
+#   (atom descriptor) -> (layer index)
+# 
+# If the layer index is -1, the atom is ignored.
 
 def rec_typer_single(t):
-    '''single channel no hydrogen'''
-    # unpack features
     num, hacc, hdon, aro, _ = t
     
     if num != 1:
@@ -24,12 +30,9 @@ def rec_typer_single(t):
         return -1
     
 def rec_typer_single_h(t):
-    '''single channel with hydrogen'''
-    # unpack features
     return 0
     
 def rec_typer_basic(t):
-    '''simple types'''
     BASIC_TYPES = [6,7,8,16]
     num, hacc, hdon, aro, _ = t
     
@@ -39,7 +42,6 @@ def rec_typer_basic(t):
         return -1
     
 def rec_typer_basic_h(t):
-    '''simple types with hydrogen'''
     BASIC_TYPES = [1,6,7,8,16]
     num, hacc, hdon, aro, _ = t
     
@@ -83,7 +85,6 @@ REC_DESC_H = [
 ]
     
 def rec_typer_desc(t):
-    '''descriptive types'''
     num, hacc, hdon, aro, _ = t
     
     f = (num,hacc,hdon,aro)
@@ -94,7 +95,6 @@ def rec_typer_desc(t):
         return -1
     
 def rec_typer_desc_h(t):
-    '''descriptive types'''
     num, hacc, hdon, aro, _ = t
     
     f = (num,hacc,hdon,aro)
@@ -145,7 +145,6 @@ def lig_typer_desc_h(t):
     else:
         return -1
 
-
 REC_TYPER = {
     'single': rec_typer_single,
     'single_h': rec_typer_single_h,
@@ -166,70 +165,35 @@ LIG_TYPER = {
 
 
 class FragmentDataset(Dataset):
-    '''
-    Utility class to work with the packed fragments.h5 format
-    '''
+    """Utility class to work with the packed fragments.h5 format."""
     
-    def __init__(self, fragment_file, fingerprint_file, rec_typer, lig_typer, filter_rec=None, 
-        fdist_min=None, fdist_max=None, fmass_min=None, fmass_max=None, verbose=False):
-        '''
-        Initialize the fragment dataset
+    def __init__(self, fragment_file, rec_typer, lig_typer, filter_rec=None,
+                 fdist_min=None, fdist_max=None, fmass_min=None,
+                 fmass_max=None, verbose=False):
+        """Initializes the fragment dataset.
         
-        Params:
-        - fragment_file: path to fragments.h5
-        - fingerprint_file: path to fingerprints.h5
-        - rec_typer: function to map receptor rows to layer index
-        - lig_typer: function to map ligand rows to layer index
-        - filter_rec: list of receptor ids to use (or None to use all)
+        Args:
+            fragment_file: path to fragments.h5
+            rec_typer: function to map receptor rows to layer index
+            lig_typer: function to map ligand rows to layer index
+            filter_rec: list of receptor ids to use (or None to use all)
 
-        Filtering options:
-        - fdist_min: minimum fragment distance
-        - fdist_max: maximum fragment distance
-        - fmass_min: minimum fragment mass (Da)
-        - fmass_max: maximum fragment mass (Da)
-        '''
+        (filtering options):
+            fdist_min: minimum fragment distance
+            fdist_max: maximum fragment distance
+            fmass_min: minimum fragment mass (Da)
+            fmass_max: maximum fragment mass (Da)
+        """
         self.verbose = verbose
 
-        #  load receptor/fragment information
-        self.rec = self.load_rec(fragment_file, rec_typer)
-        self.frag = self.load_fragments(fragment_file, lig_typer)
+        self.rec = self._load_rec(fragment_file, rec_typer)
+        self.frag = self._load_fragments(fragment_file, lig_typer)
 
-        # load fingerprint information
-        self.fingerprints = self.load_fingerprints(fingerprint_file)
-        
-        # keep track of valid examples
-        valid_mask = np.ones(self.frag['frag_lookup'].shape[0]).astype(np.bool)
-        
-        # filter by receptor id
-        if filter_rec is not None:
-            valid_rec = np.vectorize(lambda k: k[0].decode('ascii') in filter_rec)(self.frag['frag_lookup'])
-            valid_mask *= valid_rec
-            
-        # filter by fragment distance
-        if fdist_min is not None:
-            valid_mask[self.frag['frag_dist'] < fdist_min] = 0
-            
-        if fdist_max is not None:
-            valid_mask[self.frag['frag_dist'] > fdist_max] = 0
-            
-        # filter by fragment mass
-        if fmass_min is not None:
-            valid_mask[self.frag['frag_mass'] < fmass_min] = 0
+        self.valid_idx = self._get_valid_examples(
+            filter_rec, fdist_min, fdist_max, fmass_min, fmass_max)
 
-        if fmass_max is not None:
-            valid_mask[self.frag['frag_mass'] > fmass_max] = 0
-
-        # convert to a list of indexes
-        self.valid_idx = np.where(valid_mask)[0]
-
-        # compute frequency metrics over valid fragments
-        # (valid idx -> (smiles count))
-        self.freq = self.compute_freq()
-
-        self.valid_fingerprints = self.compute_valid_fingerprints()
-
-    def load_rec(self, fragment_file, rec_typer):
-        '''Load receptor information'''
+    def _load_rec(self, fragment_file, rec_typer):
+        """Loads receptor information."""
         f = h5py.File(fragment_file, 'r')
         
         rec_coords = f['rec_coords'][()]
@@ -250,7 +214,7 @@ class FragmentDataset(Dataset):
             rec_mapping[rec_lookup[i][0].decode('ascii')] = i
         
         rec = {
-            'rec_coords': rec_coords, 
+            'rec_coords': rec_coords,
             'rec_types': rec_types,
             'rec_remapped': rec_remapped,
             'rec_lookup': rec_lookup,
@@ -261,9 +225,8 @@ class FragmentDataset(Dataset):
         
         return rec
         
-    def load_fragments(self, fragment_file, lig_typer):
-        '''Load fragment information'''
-
+    def _load_fragments(self, fragment_file, lig_typer):
+        """Loads fragment information."""
         f = h5py.File(fragment_file, 'r')
 
         frag_data = f['frag_data'][()]
@@ -294,7 +257,7 @@ class FragmentDataset(Dataset):
                     frag_conn[i,:] = tuple(fdat[j])[:3]
                     found = True
                     break
-                    
+
             assert found, "missing fragment connection point at %d" % i
         
         frag = {
@@ -311,9 +274,113 @@ class FragmentDataset(Dataset):
         f.close()
 
         return frag
+
+    def _get_valid_examples(self, filter_rec, fdist_min, fdist_max, fmass_min,
+                            fmass_max):
+        """Returns an array of valid fragment indexes.
+        
+        "Valid" in this context means the fragment belongs to a receptor in
+        filter_rec and the fragment abides by the optional mass/distance
+        constraints.
+        """
+        # keep track of valid examples
+        valid_mask = np.ones(self.frag['frag_lookup'].shape[0]).astype(np.bool)
+        
+        # filter by receptor id
+        if filter_rec is not None:
+            valid_rec = np.vectorize(lambda k: k[0].decode('ascii') in filter_rec)(self.frag['frag_lookup'])
+            valid_mask *= valid_rec
+            
+        # filter by fragment distance
+        if fdist_min is not None:
+            valid_mask[self.frag['frag_dist'] < fdist_min] = 0
+            
+        if fdist_max is not None:
+            valid_mask[self.frag['frag_dist'] > fdist_max] = 0
+            
+        # filter by fragment mass
+        if fmass_min is not None:
+            valid_mask[self.frag['frag_mass'] < fmass_min] = 0
+
+        if fmass_max is not None:
+            valid_mask[self.frag['frag_mass'] > fmass_max] = 0
+
+        # convert to a list of indexes
+        valid_idx = np.where(valid_mask)[0]
+
+        return valid_idx
+
+    def __len__(self):
+        """Returns the number of valid fragment examples."""
+        return self.valid_idx.shape[0]
     
-    def load_fingerprints(self, fingerprint_file):
-        '''load fingerprint information'''
+    def __getitem__(self, idx):
+        """Returns the Nth example.
+        
+        Returns a dict with:
+            f_coords: fragment coordinates (Fx3)
+            f_types: fragment layers (Fx1)
+            p_coords: parent coordinates (Px3)
+            p_types: parent layers (Px1)
+            r_coords: receptor coordinates (Rx3)
+            r_types: receptor layers (Rx1)
+            conn: fragment connection point in the parent molecule (x,y,z)
+            smiles: fragment smiles string
+        """
+        # convert to fragment index
+        frag_idx = self.valid_idx[idx]
+        
+        # lookup fragment
+        rec_id, f_start, f_end, p_start, p_end = self.frag['frag_lookup'][frag_idx]
+        smiles = self.frag['frag_smiles'][frag_idx].decode('ascii')
+        conn = self.frag['frag_conn'][frag_idx]
+        
+        # lookup receptor
+        rec_idx = self.rec['rec_mapping'][rec_id.decode('ascii')]
+        _, r_start, r_end = self.rec['rec_lookup'][rec_idx]
+        
+        # fetch data
+        f_coords = self.frag['frag_coords'][f_start:f_end]
+        f_types = self.frag['frag_remapped'][f_start:f_end]
+        p_coords = self.frag['frag_coords'][p_start:p_end]
+        p_types = self.frag['frag_remapped'][p_start:p_end]
+        r_coords = self.rec['rec_coords'][r_start:r_end]
+        r_types = self.rec['rec_remapped'][r_start:r_end]
+
+        return {
+            'f_coords': f_coords,
+            'f_types': f_types,
+            'p_coords': p_coords,
+            'p_types': p_types,
+            'r_coords': r_coords,
+            'r_types': r_types,
+            'conn': conn,
+            'smiles': smiles
+        }
+
+    def get_valid_smiles(self):
+        """Returns a list of all valid smiles fragments."""
+        valid_smiles = set()
+
+        for idx in self.valid_idx:
+            smiles = self.frag['frag_smiles'][idx].decode('ascii')
+            valid_smiles.add(smiles)
+
+        return list(valid_smiles)
+
+
+class FingerprintDataset(Dataset):
+
+    def __init__(self, fingerprint_file):
+        """Initializes a fingerprint dataset.
+
+        Args:
+            fingerprint_file: path to a fingerprint .h5 file
+        """
+        self.fingerprints = self._load_fingerprints(fingerprint_file)
+
+    def _load_fingerprints(self, fingerprint_file):
+        """Loads fingerprint information."""
         f = h5py.File(fingerprint_file, 'r')
         
         fingerprint_data = f['fingerprints'][()]
@@ -335,79 +402,188 @@ class FragmentDataset(Dataset):
         
         return fingerprints
 
-    def compute_freq(self):
-        '''compute fragment frequencies'''
-        all_smiles = self.frag['frag_smiles']
-        valid_smiles = all_smiles[self.valid_idx]
-
-        smiles_freq = {}
-        for i in range(len(valid_smiles)):
-            sm = valid_smiles[i].decode('ascii')
-            if not sm in smiles_freq:
-                smiles_freq[sm] = 0
-            smiles_freq[sm] += 1
-
-        freq = np.zeros(len(valid_smiles))
-        for i in range(len(valid_smiles)):
-            freq[i] = smiles_freq[valid_smiles[i].decode('ascii')]
-
-        return freq
-
-    def compute_valid_fingerprints(self):
-        '''compute a list of valid fingerprint indexes'''
-        valid_sm = self.frag['frag_smiles'][self.valid_idx]
-        valid_sm = list(set(list(valid_sm))) # unique
-
-        valid_idx = []
-        for sm in valid_sm:
-            valid_idx.append(self.fingerprints['fingerprint_mapping'][sm.decode('ascii')])
-        valid_idx = sorted(valid_idx)
-
-        return valid_idx
-
-    def normalize_fingerprints(self, std, mean):
-        '''normalize fingerprints with a given std and mean'''
-        self.fingerprints['fingerprint_data'] -= mean
-        self.fingerprints['fingerprint_data'] /= std
+    def for_smiles(self, smiles):
+        """Return a Tensor of fingerprints for a list of smiles.
         
-    def __len__(self):
-        '''returns the number of fragment examples'''
-        return self.valid_idx.shape[0]
+        Args:
+            smiles: size N list of smiles strings (as str not bytes)
+        """
+        fp = np.zeros((len(smiles), self.fingerprints['fingerprint_data'].shape[1]))
+
+        for i in range(len(smiles)):
+            fp_idx = self.fingerprints['fingerprint_mapping'][smiles[i]]
+            fp[i] = self.fingerprints['fingerprint_data'][fp_idx]
+
+        return torch.Tensor(fp)
+
+
+# class FragmentDataset2(Dataset):
+#     '''
+#     Utility class to work with the packed fragments.h5 format
+
+#     (no fingerprints)
+#     '''
     
-    def __getitem__(self, idx):
-        '''
-        retrieve the nth example
+#     def __init__(self, fragment_file, rec_typer, lig_typer, filter_rec=None, 
+#         fdist_min=None, fdist_max=None, fmass_min=None, fmass_max=None, verbose=False):
+#         '''
+#         Initialize the fragment dataset
         
-        returns (f_coords, f_types, p_coords, p_types, r_coords, r_types, conn, fingerprint, extra)
-        '''
-        # convert to fragment index
-        frag_idx = self.valid_idx[idx]
-        
-        # lookup fragment
-        rec_id, f_start, f_end, p_start, p_end = self.frag['frag_lookup'][frag_idx]
-        smiles = self.frag['frag_smiles'][frag_idx]
-        conn = self.frag['frag_conn'][frag_idx]
-        
-        # lookup fingerprint
-        fingerprint = self.fingerprints['fingerprint_data'][
-            self.fingerprints['fingerprint_mapping'][smiles.decode('ascii')]
-        ]
-        
-        # lookup receptor
-        rec_idx = self.rec['rec_mapping'][rec_id.decode('ascii')]
-        _, r_start, r_end = self.rec['rec_lookup'][rec_idx]
-        
-        # fetch data
-        f_coords = self.frag['frag_coords'][f_start:f_end]
-        f_types = self.frag['frag_remapped'][f_start:f_end]
-        p_coords = self.frag['frag_coords'][p_start:p_end]
-        p_types = self.frag['frag_remapped'][p_start:p_end]
-        r_coords = self.rec['rec_coords'][r_start:r_end]
-        r_types = self.rec['rec_remapped'][r_start:r_end]
+#         Params:
+#         - fragment_file: path to fragments.h5
+#         - rec_typer: function to map receptor rows to layer index
+#         - lig_typer: function to map ligand rows to layer index
+#         - filter_rec: list of receptor ids to use (or None to use all)
 
-        extra = {
-            'freq': self.freq[idx]
-        }
+#         Filtering options:
+#         - fdist_min: minimum fragment distance
+#         - fdist_max: maximum fragment distance
+#         - fmass_min: minimum fragment mass (Da)
+#         - fmass_max: maximum fragment mass (Da)
+#         '''
+#         self.verbose = verbose
+
+#         #  load receptor/fragment information
+#         self.rec = self.load_rec(fragment_file, rec_typer)
+#         self.frag = self.load_fragments(fragment_file, lig_typer)
+
+#         # keep track of valid examples
+#         valid_mask = np.ones(self.frag['frag_lookup'].shape[0]).astype(np.bool)
         
-        return f_coords, f_types, p_coords, p_types, r_coords, r_types, conn, fingerprint, extra
+#         # filter by receptor id
+#         if filter_rec is not None:
+#             valid_rec = np.vectorize(lambda k: k[0].decode('ascii') in filter_rec)(self.frag['frag_lookup'])
+#             valid_mask *= valid_rec
+            
+#         # filter by fragment distance
+#         if fdist_min is not None:
+#             valid_mask[self.frag['frag_dist'] < fdist_min] = 0
+            
+#         if fdist_max is not None:
+#             valid_mask[self.frag['frag_dist'] > fdist_max] = 0
+            
+#         # filter by fragment mass
+#         if fmass_min is not None:
+#             valid_mask[self.frag['frag_mass'] < fmass_min] = 0
+
+#         if fmass_max is not None:
+#             valid_mask[self.frag['frag_mass'] > fmass_max] = 0
+
+#         # convert to a list of indexes
+#         self.valid_idx = np.where(valid_mask)[0]
+
+#     def load_rec(self, fragment_file, rec_typer):
+#         '''Load receptor information'''
+#         f = h5py.File(fragment_file, 'r')
+        
+#         rec_coords = f['rec_coords'][()]
+#         rec_types = f['rec_types'][()]
+#         rec_lookup = f['rec_lookup'][()]
+        
+#         r = range(len(rec_types))
+#         if self.verbose:
+#             r = tqdm.tqdm(r, desc='Remap receptor atoms')
+
+#         rec_remapped = np.zeros(len(rec_types)).astype(np.int32)
+#         for i in r:
+#             rec_remapped[i] = rec_typer(rec_types[i])
+
+#         # create rec mapping
+#         rec_mapping = {}
+#         for i in range(len(rec_lookup)):
+#             rec_mapping[rec_lookup[i][0].decode('ascii')] = i
+        
+#         rec = {
+#             'rec_coords': rec_coords, 
+#             'rec_types': rec_types,
+#             'rec_remapped': rec_remapped,
+#             'rec_lookup': rec_lookup,
+#             'rec_mapping': rec_mapping
+#         }
+        
+#         f.close()
+        
+#         return rec
+        
+#     def load_fragments(self, fragment_file, lig_typer):
+#         '''Load fragment information'''
+
+#         f = h5py.File(fragment_file, 'r')
+
+#         frag_data = f['frag_data'][()]
+#         frag_lookup = f['frag_lookup'][()]
+#         frag_smiles = f['frag_smiles'][()]
+#         frag_mass = f['frag_mass'][()]
+#         frag_dist = f['frag_dist'][()]
+        
+#         # unpack frag data into separate structures
+#         frag_coords = frag_data[:,:3].astype(np.float32)
+#         frag_types = frag_data[:,3].astype(np.int32)
+        
+#         frag_remapped = np.vectorize(lig_typer)(frag_types)
+        
+#         # find and save connection point
+#         r = range(len(frag_lookup))
+#         if self.verbose:
+#             r = tqdm.tqdm(r, desc='Frag connection point')
+
+#         frag_conn = np.zeros((len(frag_lookup), 3))
+#         for i in r:
+#             _,f_start,f_end,_,_ = frag_lookup[i]
+#             fdat = frag_data[f_start:f_end]
+            
+#             found = False
+#             for j in range(len(fdat)):
+#                 if fdat[j][3] == 0:
+#                     frag_conn[i,:] = tuple(fdat[j])[:3]
+#                     found = True
+#                     break
+                    
+#             assert found, "missing fragment connection point at %d" % i
+        
+#         frag = {
+#             'frag_coords': frag_coords,     # d_idx -> (x,y,z)
+#             'frag_types': frag_types,       # d_idx -> (type)
+#             'frag_remapped': frag_remapped, # d_idx -> (layer)
+#             'frag_lookup': frag_lookup,     # f_idx -> (rec_id, fstart, fend, pstart, pend)
+#             'frag_conn': frag_conn,         # f_idx -> (x,y,z)
+#             'frag_smiles': frag_smiles,     # f_idx -> smiles
+#             'frag_mass': frag_mass,         # f_idx -> mass
+#             'frag_dist': frag_dist,         # f_idx -> dist
+#         }
+        
+#         f.close()
+
+#         return frag
+
+#     def __len__(self):
+#         '''returns the number of fragment examples'''
+#         return self.valid_idx.shape[0]
     
+#     def __getitem__(self, idx):
+#         '''
+#         retrieve the nth example
+        
+#         returns (f_coords, f_types, p_coords, p_types, r_coords, r_types, conn, fingerprint, extra)
+#         '''
+#         # convert to fragment index
+#         frag_idx = self.valid_idx[idx]
+        
+#         # lookup fragment
+#         rec_id, f_start, f_end, p_start, p_end = self.frag['frag_lookup'][frag_idx]
+#         smiles = self.frag['frag_smiles'][frag_idx]
+#         conn = self.frag['frag_conn'][frag_idx]
+        
+#         # lookup receptor
+#         rec_idx = self.rec['rec_mapping'][rec_id.decode('ascii')]
+#         _, r_start, r_end = self.rec['rec_lookup'][rec_idx]
+        
+#         # fetch data
+#         f_coords = self.frag['frag_coords'][f_start:f_end]
+#         f_types = self.frag['frag_remapped'][f_start:f_end]
+#         p_coords = self.frag['frag_coords'][p_start:p_end]
+#         p_types = self.frag['frag_remapped'][p_start:p_end]
+#         r_coords = self.rec['rec_coords'][r_start:r_end]
+#         r_types = self.rec['rec_remapped'][r_start:r_end]
+        
+#         return f_coords, f_types, p_coords, p_types, r_coords, r_types, conn, smiles

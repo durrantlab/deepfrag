@@ -1,531 +1,404 @@
 
+import os
+import json
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import wandb
+import tqdm
 
-from leadopt.train import train, train_dual, train_latent, train_latent_direct, train_attention
-from leadopt.metrics import tanimoto
+from leadopt.models.voxel import VoxelFingerprintNet
+from leadopt.data_util import FragmentDataset, FingerprintDataset, LIG_TYPER,\
+    REC_TYPER
+from leadopt.grid_util import get_batch
+from leadopt.metrics import mse, bce, tanimoto, cos, top_k_acc, average_support
 
-from leadopt.models.voxel import VoxelFingerprintNet, VoxelFingerprintNet2, VoxelFingerprintNet2b, VoxelFingerprintNet3, VoxelFingerprintNet4
-from leadopt.models.latent import LatentEncoder, LatentDecoder
-from leadopt.models.encoder_skip import FullSkipV1
+from config import partitions
 
 
-def denorm(f, std, mean):
-    t_std = torch.Tensor(std).cuda()
-    t_mean = torch.Tensor(mean).cuda()
-
-    def g(yp, yt):
-        yp = (yp * t_std) + t_mean
-        yt = (yt * t_std) + t_mean
-
-        return f(yp, yt)
-
-    return g
-
-
-def within_k_mass(k):
-    def g(yp, yt):
-        return torch.mean((torch.abs(yp[:,0] - yt[:,0]) < k).to(torch.float))
-
-    return g
-
-
-def average_position(fingerprints, fn, norm=True):
-    t_fingerprints = torch.Tensor(fingerprints).cuda()
-
-    def fn_br(yp,yt):
-        yp_b, yt_b = torch.broadcast_tensors(yp, yt)
-        return fn(yp_b.detach(), yt_b.detach())
-
-    def g(yp, yt):
-        # correct distance
-        p_dist = fn_br(yp, yt)
-
-        c = torch.empty(yp.shape[0])
-        for i in range(yp.shape[0]):
-            # compute distance to all other fragments
-            dist = fn_br(yp[i].unsqueeze(0), t_fingerprints)
-
-            # number of fragment that are closer or equal
-            count = torch.sum((dist <= p_dist[i]).to(torch.float))
-
-            if norm:
-                count /= t_fingerprints.shape[0]
-
-            c[i] = count
-            
-        score = torch.mean(c)
-
-        return score
-
-    return g
-
-
-def average_position_mse(fingerprints, norm):
-    def fn(yp, yt):
-        return torch.sum((yp - yt) ** 2, axis=1)
-    return average_position(fingerprints, fn, norm)
-
-
-def average_position_cos(fingerprints, norm):
-    cos = nn.CosineSimilarity(dim=1, eps=1e-6)
-    def fn(yp, yt):
-        return 1 - cos(yp,yt)
-    return average_position(fingerprints, fn, norm)
-
-
-def average_position_tanimoto(fingerprints, norm):
-    def tanimoto(yp, yt):
-        intersect = torch.sum(yt * torch.round(yp), axis=1)
-        union = torch.sum(torch.clamp(yt + torch.round(yp), 0, 1), axis=1)
-        return 1 - (intersect / union)
-    return average_position(fingerprints, tanimoto, norm)
-
-
-def average_position_bce(fingerprints, norm):
-    def fn(yp, yt):
-        return torch.sum(F.binary_cross_entropy(yp,yt,reduction='none'), axis=1)
-    return average_position(fingerprints, fn, norm)
-
-
-def bin_accuracy(yp, yt):
-    return torch.mean((torch.round(yp) == yt).to(torch.float))
-
-
-def average_support(fingerprints, fn):
-    t_fingerprints = torch.Tensor(fingerprints).cuda()
-
-    def fn_br(yp,yt):
-        yp_b, yt_b = torch.broadcast_tensors(yp, yt)
-        return fn(yp_b, yt_b.detach())
-
-    def g(yp, yt):
-        # correct distance
-        p_dist = fn_br(yp, yt)
-
-        c = torch.empty(yp.shape[0])
-        for i in range(yp.shape[0]):
-            # compute distance to all other fragments
-            dist = fn_br(yp[i].unsqueeze(0), t_fingerprints)
-
-            # shift distance so bad examples are positive
-            dist -= p_dist[i]
-            dist *= -1
-
-            dist_n = F.sigmoid(dist)
-
-            c[i] = torch.mean(dist_n)
-
-        score = torch.mean(c)
-
-        return score
-
-    return g
-
-
-def average_support_mse(fingerprints):
-    def fn(yp, yt):
-        return torch.sum((yp - yt) ** 2, axis=1)
-    return average_support(fingerprints, fn)
-
-
-def average_support_weighted(fingerprints, fn):
-    t_fingerprints = torch.Tensor(fingerprints).cuda()
-
-    def fn_br(yp,yt,att):
-        yp_b = yp.expand(yt.shape)
-        att_b = att.expand(yt.shape)
-
-        return fn(yp_b, yt.detach(), att_b)
-
-    def g(yp, yt, att):
-        # correct distance
-        p_dist = fn_br(yp, yt, att)
-
-        c = torch.empty(yp.shape[0])
-        for i in range(yp.shape[0]):
-            # compute distance to all other fragments
-            dist = fn_br(yp[i].unsqueeze(0), t_fingerprints, att[i].unsqueeze(0))
-
-            # shift distance so bad examples are positive
-            dist -= p_dist[i]
-            dist *= -1
-
-            dist_n = F.sigmoid(dist)
-
-            c[i] = torch.mean(dist_n)
-
-        score = torch.mean(c)
-
-        return score
-
-    return g
-
-
-def average_support_weighted_mse(fingerprints):
-    def fn(yp, yt, att):
-
-        l = (yp - yt) ** 2
-        l *= att
-        return torch.sum(l, axis=1)
-    return average_support_weighted(fingerprints, fn)
-
-
-def average_position_weighted(fingerprints, fn, norm=True):
-    t_fingerprints = torch.Tensor(fingerprints).cuda()
-
-    def fn_br(yp,yt,att):
-        yp_b = yp.expand(yt.shape)
-        att_b = att.expand(yt.shape)
-
-        return fn(yp_b.detach(), yt.detach(), att_b.detach())
-
-    def g(yp, yt, att):
-        # correct distance
-        p_dist = fn_br(yp, yt, att)
-
-        c = torch.empty(yp.shape[0])
-        for i in range(yp.shape[0]):
-            # compute distance to all other fragments
-            dist = fn_br(yp[i].unsqueeze(0), t_fingerprints, att[i].unsqueeze(0))
-
-            # number of fragment that are closer or equal
-            count = torch.sum((dist <= p_dist[i]).to(torch.float))
-
-            if norm:
-                count /= t_fingerprints.shape[0]
-
-            c[i] = count
-            
-        score = torch.mean(c)
-
-        return score
-
-    return g
-
-
-def average_position_weighted_mse(fingerprints, norm):
-    def fn(yp, yt, att):
-        l = (yp - yt) ** 2
-        l *= att
-        return torch.sum(l, axis=1)
-    return average_position_weighted(fingerprints, fn, norm)
-
-
-def top_k_acc(t_fingerprints, fn, k, pre=''):
-
-    def fn_br(yp,yt):
-        yp_b, yt_b = torch.broadcast_tensors(yp, yt)
-        return fn(yp_b.detach(), yt_b.detach())
-
-    def g(yp, yt):
-        # correct distance
-        p_dist = fn_br(yp, yt)
-
-        c = torch.empty(yp.shape[0], len(k))
-        for i in range(yp.shape[0]):
-            # compute distance to all other fragments
-            dist = fn_br(yp[i].unsqueeze(0), t_fingerprints)
-
-            # number of fragment that are closer or equal
-            count = torch.sum((dist < p_dist[i]).to(torch.float))
-
-            for j in range(len(k)):
-                c[i,j] = int(count < k[j])
-            
-        score = torch.mean(c, axis=0)
-
-        m = {'%sacc_%d' % (pre,h):v.item() for h,v in zip(k,score)}
-
-        return m
-
-    return g
-
-
-def top_k_acc_mse(t_fingerprints, k, pre):
-    def fn(yp, yt):
-        return torch.sum((yp - yt) ** 2, axis=1)
-    return top_k_acc(t_fingerprints, fn, k, pre)
-
-
-def mse(yp, yt):
-    return torch.sum((yp - yt) ** 2, axis=1)
-
-def bce(yp, yt):
-    return torch.sum(F.binary_cross_entropy(yp,yt,reduction='none'), axis=1)
-
-def tanimoto(yp, yt):
-    intersect = torch.sum(yt * torch.round(yp), axis=1)
-    union = torch.sum(torch.clamp(yt + torch.round(yp), 0, 1), axis=1)
-    return 1 - (intersect / union)
-
-_cos = nn.CosineSimilarity(dim=1, eps=1e-6)
-def cos(yp, yt):
-    return 1 - _cos(yp,yt)
-
-def do_mean(fn):
+def _do_mean(fn):
     def g(yp, yt):
         return torch.mean(fn(yp,yt))
     return g
 
-def _get_loss(loss, fingerprints):
-    if loss == 'mse': return do_mean(mse)
-    elif loss == 'bce': return do_mean(bce)
-    elif loss == 'tanimoto': return do_mean(tanimoto)
-    elif loss == 'cos': return do_mean(cos)
 
-    elif loss == 'mse_support': return average_support(fingerprints, mse)
-    elif loss == 'bce_support': return average_support(fingerprints, bce)
-    elif loss == 'tanimoto_support': return average_support(fingerprints, tanimoto)
-    elif loss == 'cos_support': return average_support(fingerprints, cos)
-
-class Model(object):
-    def __init__(self):
-        pass
-
-    def setup_parser(self, name, parser):
-        pass
-
-    def build_model(self, args):
-        pass
-
-    def get_metrics(self, args, std, mean, train_dat, test_dat):
-        '''Returns a dict of metrics'''
-        pass
-
-    def get_train_mode(self):
-        pass
+def _direct_loss(fingerprints, fn):
+    return _do_mean(fn)
 
 
-class VoxelNet(Model):
+DIST_FN = {
+    'mse': mse,
+    'bce': bce,
+    'cos': cos,
+    'tanimoto': tanimoto
+}
 
-    def setup_parser(self, name, parser):
-        sub = parser.add_parser(name)
+
+LOSS_TYPE = {
+    # minimize distance to target fingeprint
+    'direct': _direct_loss,
+
+    # minimize distance to target and maximize distance to all other
+    'support_v1': average_support
+}
+
+
+class RunLog(object):
+    def __init__(self, args, models, wandb_project=None):
+        """Initialize a run logger.
+        
+        Args:
+            args: command line training arguments
+            models: {name: model} mapping
+            wandb_project: a project to initialize wandb or None
+        """
+        self._use_wandb = wandb_project != None
+        if self._use_wandb:
+            wandb.init(
+                project=wandb_project,
+                config=args
+            )
+    
+            for m in models:
+                wandb.watch(models[m])
+
+    def log(self, x):
+        if self._use_wandb:
+            wandb.log(x)
+
+
+class MetricTracker(object):
+    def __init__(self, name):
+        self._name = name
+        self._metrics = {}
+
+    def update(self, name, metric):
+        if type(metric) is dict:
+            for subname in metric:
+                fullname = '%s_%s' % (self._name, subname)
+                if not fullname in self._metrics:
+                    self._metrics[fullname] = 0
+                self._metrics[fullname] += metric[subname]
+        else:
+            fullname = '%s_%s' % (self._name, name)
+            if not fullname in self._metrics:
+                self._metrics[fullname] = 0
+            self._metrics[fullname] += metric
+
+    def normalize(self, size):
+        for m in self._metrics:
+            self._metrics[m] /= size
+
+    def clear(self):
+        self._metrics = {}
+
+    def get(self, name):
+        fullname = '%s_%s' % (self._name, name)
+        return self._metrics[fullname]
+
+    def get_all(self):
+        return self._metrics
+
+
+class LeadoptModel(object):
+    """Abstract LeadoptModel base class."""
+
+    @staticmethod
+    def setup_base_parser(parser):
+        """Configures base parser arguments."""
+        parser.add_argument('--wandb_project', default=None, help='''
+        Set this argument to track run in wandb.
+        ''')
+
+    @staticmethod
+    def setup_parser(sub):
+        """Adds arguments to a subparser.
+        
+        Args:
+            sub: an argparse subparser
+        """
+        raise NotImplementedError()
+
+    @classmethod
+    def load(cls, path):
+        """Load model configuration saved with save().
+
+        Call LeadoptModel.load to infer model type.
+        Or call subclass.load to load a specific model type.
+        
+        Args:
+            path: full path to saved model
+        """
+        args_path = os.path.join(path, 'args.json')
+        args = json.loads(open(args_path, 'r').read())
+
+        model_type = MODELS[args['version']] if cls is LeadoptModel else cls
+
+        instance = model_type(args, with_log=False)
+        for name in instance._models:
+            model_path = os.path.join(path, '%s.pt' % name)
+            instance._models[name].load_state_dict(torch.load(model_path))
+
+        return instance
+
+    def __init__(self, args, with_log=True):
+        self._args = args
+        self._models = self.init_models()
+        if with_log:
+            wandb_project = None
+            if 'wandb_project' in self._args:
+                wandb_project = self._args['wandb_project']
+
+            self._log = RunLog(self._args, self._models, wandb_project)
+
+    def save(self, path):
+        """Save model configuration to a path.
+        
+        Args:
+            path: path to an existing directory to save models
+        """
+        os.makedirs(path, exist_ok=True)
+
+        args_path = os.path.join(path, 'args.json')
+        open(args_path, 'w').write(json.dumps(self._args))
+
+        for name in self._models:
+            model_path = os.path.join(path, '%s.pt' % name)
+            torch.save(self._models[name].state_dict(), model_path)
+
+    def init_models(self):
+        """Initializes any pytorch models.
+
+        Returns a dict of name->model mapping:
+        {'model_1': m1, 'model_2': m2, ...}
+        """
+        return {}
+
+    def train(self, save_path=None):
+        """Train the models."""
+        raise NotImplementedError()
+
+
+class VoxelNet(LeadoptModel):
+    @staticmethod
+    def setup_parser(sub):
+        # testing
+        sub.add_argument('--no_partitions', action='store_true', default=False, help='''
+        If set, disable the use of TRAIN/VAL partitions during training.
+        ''')
+
+        # dataset
+        sub.add_argument('-f', '--fragments', required=True, help='''
+        Path to fragments file.
+        ''')
+        sub.add_argument('-fp', '--fingerprints', required=True, help='''
+        Path to fingerprints file.
+        ''')
+
+        # training parameters
+        sub.add_argument('-lr', '--learning_rate', type=float, default=1e-4)
+        sub.add_argument('--num_epochs', type=int, default=50, help='''
+        Number of epochs to train for.
+        ''')
+        sub.add_argument('--test_steps', type=int, default=500, help='''
+        Number of evaluation steps per epoch.
+        ''')
+        sub.add_argument('-b', '--batch_size', default=32, type=int)
+
+        # grid generation
+        sub.add_argument('--grid_width', type=int, default=24)
+        sub.add_argument('--grid_res', type=float, default=1)
+
+        # fragment filtering
+        sub.add_argument('--fdist_min', type=float, help='''
+        Ignore fragments closer to the receptor than this distance (Angstroms).
+        ''')
+        sub.add_argument('--fdist_max', type=float, help='''
+        Ignore fragments further from the receptor than this distance (Angstroms).
+        ''')
+        sub.add_argument('--fmass_min', type=float, help='''
+        Ignore fragments smaller than this mass (Daltons).
+        ''')
+        sub.add_argument('--fmass_max', type=float, help='''
+        Ignore fragments larger than this mass (Daltons).
+        ''')
+
+        # receptor/parent options
+        sub.add_argument('--ignore_receptor', action='store_true', default=False)
+        sub.add_argument('--ignore_parent', action='store_true', default=False)
+        sub.add_argument('-rec_typer', required=True, choices=[k for k in REC_TYPER])
+        sub.add_argument('-lig_typer', required=True, choices=[k for k in LIG_TYPER])
+        sub.add_argument('-rec_channels', required=True, type=int)
+        sub.add_argument('-lig_channels', required=True, type=int)
+
+        # model parameters
         sub.add_argument('--in_channels', type=int, default=18)
         sub.add_argument('--output_size', type=int, default=2048)
         sub.add_argument('--pad', default=False, action='store_true')
         sub.add_argument('--blocks', nargs='+', type=int, default=[32,64])
         sub.add_argument('--fc', nargs='+', type=int, default=[2048])
-
         sub.add_argument('--use_all_labels', default=False, action='store_true')
+        sub.add_argument('--dist_fn', default='mse', choices=[k for k in DIST_FN])
+        sub.add_argument('--loss', default='direct', choices=[k for k in LOSS_TYPE])
 
-        sub.add_argument('--loss', default='mse_support')
-
-    def build_model(self, args):
-        m = VoxelFingerprintNet2b(
-            in_channels=args.in_channels,
-            output_size=args.output_size,
-            blocks=args.blocks,
-            fc=args.fc,
-            pad=args.pad
+    def init_models(self):
+        voxel = VoxelFingerprintNet(
+            in_channels=self._args['in_channels'],
+            output_size=self._args['output_size'],
+            blocks=self._args['blocks'],
+            fc=self._args['fc'],
+            pad=self._args['pad']
         ).cuda()
-        return m
+        return {'voxel': voxel}
 
-    def get_metrics(self, args, std, mean, train_dat, test_dat):
+    def train(self, save_path=None):
+
+        print('[*] Loading data...', flush=True)
+        train_dat = FragmentDataset(
+            self._args['fragments'],
+            rec_typer=REC_TYPER[self._args['rec_typer']],
+            lig_typer=LIG_TYPER[self._args['lig_typer']],
+            filter_rec=(
+                partitions.TRAIN if not self._args['no_partitions'] else None),
+            fdist_min=self._args['fdist_min'], 
+            fdist_max=self._args['fdist_max'], 
+            fmass_min=self._args['fmass_min'], 
+            fmass_max=self._args['fmass_max'],
+            verbose=True
+        )
+
+        val_dat = FragmentDataset(
+            self._args['fragments'],
+            rec_typer=REC_TYPER[self._args['rec_typer']],
+            lig_typer=LIG_TYPER[self._args['lig_typer']],
+            filter_rec=(
+                partitions.VAL if not self._args['no_partitions'] else None),
+            fdist_min=self._args['fdist_min'], 
+            fdist_max=self._args['fdist_max'], 
+            fmass_min=self._args['fmass_min'], 
+            fmass_max=self._args['fmass_max'],
+            verbose=True
+        )
+
+        fingerprints = FingerprintDataset(self._args['fingerprints'])
+
+        train_smiles = train_dat.get_valid_smiles()
+        val_smiles = val_dat.get_valid_smiles()
+        all_smiles = list(set(train_smiles) | set(val_smiles))
+
+        train_fingerprints = fingerprints.for_smiles(train_smiles).cuda()
+        val_fingerprints = fingerprints.for_smiles(val_smiles).cuda()
+        all_fingerprints = fingerprints.for_smiles(all_smiles).cuda()
+
+        print('[*] Training...', flush=True)
+        opt = torch.optim.Adam(
+            self._models['voxel'].parameters(), lr=self._args['learning_rate'])
+        steps_per_epoch = len(train_dat) // self._args['batch_size']
         
-        all_fp = list(set(train_dat.valid_fingerprints + test_dat.valid_fingerprints))
-        fingerprints = train_dat.fingerprints['fingerprint_data'][all_fp]
+        # configure metrics
+        dist_fn = DIST_FN[self._args['dist_fn']]
 
-        train_fingerprints = train_dat.fingerprints['fingerprint_data'][train_dat.valid_fingerprints]
-        test_fingerprints = train_dat.fingerprints['fingerprint_data'][test_dat.valid_fingerprints]
+        loss_fingerprints = train_fingerprints
+        if self._args['use_all_labels']:
+            loss_fingerprints = all_fingerprints
 
-        t_all_fp = torch.Tensor(fingerprints).cuda()
-        t_test_fp = torch.Tensor(test_fingerprints).cuda()
+        loss_fn = LOSS_TYPE[self._args['loss']](loss_fingerprints, dist_fn)
 
         metrics = {
-            'acc': top_k_acc_mse(t_all_fp, k=[1,5,10,50,100], pre='all'),
-            'acc2': top_k_acc_mse(t_test_fp, k=[1,5,10,50,100], pre='test'),
+            'all': top_k_acc(all_fingerprints, dist_fn, [1,5,10,50,100], pre='all')
         }
 
-        POS_METRICS = [
-            ('mse', average_position_mse),
-        ]
+        train_metrics = MetricTracker('train')
+        val_metrics = MetricTracker('val')
 
-        for name, eval_fn in POS_METRICS:
-            metrics.update({
-                'pos_%s' % name: eval_fn(fingerprints, norm=True),
-                'pos_%s_raw' % name: eval_fn(fingerprints, norm=False),
-            })
+        best_loss = None
 
-        return metrics
+        for epoch in range(self._args['num_epochs']):
+            self._models['voxel'].train()
+            train_pbar = tqdm.tqdm(
+                range(steps_per_epoch),
+                desc='Train (epoch %d)' % epoch
+            )
+            for step in train_pbar:
+                torch_grid, examples = get_batch(
+                    train_dat,
+                    self._args['rec_channels'],
+                    self._args['lig_channels'], 
+                    batch_size=self._args['batch_size'],
+                    batch_set=None,
+                    width=self._args['grid_width'],
+                    res=self._args['grid_res'],
+                    ignore_receptor=self._args['ignore_receptor'],
+                    ignore_parent=self._args['ignore_parent']
+                )
 
-    def get_loss(self, args, std, mean, train_dat, test_dat):
-        
-        all_fp = set(train_dat.valid_fingerprints)
-        if args.use_all_labels:
-            all_fp |= set(test_dat.valid_fingerprints)
-        all_fp = list(all_fp)
+                smiles = [example['smiles'] for example in examples]
+                correct_fp = torch.Tensor(
+                    fingerprints.for_smiles(smiles)).cuda()
 
-        fingerprints = train_dat.fingerprints['fingerprint_data'][all_fp]
+                predicted_fp = self._models['voxel'](torch_grid)
 
-        # loss_fn = average_support_mse(fingerprints)
-        loss_fn = _get_loss(args.loss, fingerprints)
+                loss = loss_fn(predicted_fp, correct_fp)
 
-        return loss_fn
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
 
-    def get_train_mode(self):
-        return train
+                train_metrics.update('loss', loss)
+                for m in metrics:
+                    train_metrics.update(m, metrics[m](predicted_fp, correct_fp))
 
-class Voxel3(Model):
+                train_metrics.normalize(self._args['batch_size'])
+                self._log.log(train_metrics.get_all())
+                train_metrics.clear()
 
-    def setup_parser(self, name, parser):
-        sub = parser.add_parser(name)
-        sub.add_argument('--in_channels', type=int, default=18)
-        sub.add_argument('--in_fingerprint', type=int, default=2048)
-        sub.add_argument('--f1', type=int, default=32)
-        sub.add_argument('--f2', type=int, default=64)
-        sub.add_argument('--r1', type=int, default=256)
-        sub.add_argument('--r2', type=int, default=256)
-        sub.add_argument('--p1', type=int, default=256)
+            self._models['voxel'].eval()
 
-    def build_model(self, args):
-        m = VoxelFingerprintNet3(
-            in_channels=args.in_channels,
-            in_fingerprint=args.in_fingerprint,
-            f1=args.f1,
-            f2=args.f2,
-            r1=args.r1,
-            r2=args.r2,
-            p1=args.p1,
-        ).cuda()
-        return m
+            val_pbar = tqdm.tqdm(
+                range(self._args['test_steps']),
+                desc='Val %d' % epoch
+            )
+            with torch.no_grad():
+                for step in val_pbar:
+                    torch_grid, examples = get_batch(
+                        val_dat,
+                        self._args['rec_channels'],
+                        self._args['lig_channels'], 
+                        batch_size=self._args['batch_size'],
+                        batch_set=None,
+                        width=self._args['grid_width'],
+                        res=self._args['grid_res'],
+                        ignore_receptor=self._args['ignore_receptor'],
+                        ignore_parent=self._args['ignore_parent']
+                    )
 
-    def get_metrics(self, args, std, mean, train_dat, test_dat):
-        metrics = {
-            'bin_acc': bin_accuracy,
-        }
-        return metrics
+                    smiles = [example['smiles'] for example in examples]
+                    correct_fp = torch.Tensor(
+                        fingerprints.for_smiles(smiles)).cuda()
 
-    def get_train_mode(self):
-        return train_dual
+                    predicted_fp = self._models['voxel'](torch_grid)
 
-class Voxel4(Model):
+                    loss = loss_fn(predicted_fp, correct_fp)
 
-    def setup_parser(self, name, parser):
-        sub = parser.add_parser(name)
-        sub.add_argument('--in_channels', type=int, default=18)
-        sub.add_argument('--output_size', type=int, default=2048)
-        sub.add_argument('--sigmoid', default=False, action='store_true')
-        sub.add_argument('--batchnorm', default=False, action='store_true')
-        sub.add_argument('--f1', type=int, default=32)
-        sub.add_argument('--f2', type=int, default=64)
+                    val_metrics.update('loss', loss)
+                    for m in metrics:
+                        val_metrics.update(m, metrics[m](predicted_fp, correct_fp))
 
-    def build_model(self, args):
-        m = VoxelFingerprintNet4(
-            in_channels=args.in_channels,
-            output_size=args.output_size,
-            sigmoid=args.sigmoid,
-            batchnorm=args.batchnorm,
-            f1=args.f1,
-            f2=args.f2
-        ).cuda()
-        return m
+                val_metrics.normalize(self._args['test_steps'] * self._args['batch_size'])
+                self._log.log(val_metrics.get_all())
 
-    def get_metrics(self, args, std, mean, train_dat, test_dat):
-        
-        all_fp = list(set(train_dat.valid_fingerprints + test_dat.valid_fingerprints))
-        fingerprints = train_dat.fingerprints['fingerprint_data'][all_fp]
+                val_loss = val_metrics.get('loss')
+                if best_loss is None or val_loss < best_loss:
+                    # save new best model
+                    best_loss = val_loss
+                    print('[*] New best loss: %f' % best_loss, flush=True)
+                    if save_path:
+                        self.save(save_path)
 
-        train_fingerprints = train_dat.fingerprints['fingerprint_data'][train_dat.valid_fingerprints]
-        test_fingerprints = train_dat.fingerprints['fingerprint_data'][test_dat.valid_fingerprints]
-
-        metrics = {}
-
-        POS_METRICS = [
-            ('mse_att', average_position_weighted_mse),
-        ]
-
-        for name, eval_fn in POS_METRICS:
-            metrics.update({
-                'pos_%s' % name: eval_fn(fingerprints, norm=True),
-                'pos_%s_raw' % name: eval_fn(fingerprints, norm=False),
-            })
-
-        def avg_att(yp,yt,att):
-            return att.cpu().detach().numpy()
-
-        metrics.update({
-            'attention': avg_att
-        })
-
-        return metrics
-
-    def get_loss(self, args, std, mean, train_dat, test_dat):
-        
-        all_fp = list(set(train_dat.valid_fingerprints + test_dat.valid_fingerprints))
-        fingerprints = train_dat.fingerprints['fingerprint_data'][all_fp]
-
-        loss_fn = average_support_weighted_mse(fingerprints)
-
-        return loss_fn
-
-    def get_train_mode(self):
-        return train_attention
-
-class Latent1(Model):
-
-    def setup_parser(self, name, parser):
-        sub = parser.add_parser(name)
-        sub.add_argument('frag_loss')
-        sub.add_argument('context_loss')
-
-    def build_model(self, args):
-        encoder = LatentEncoder(9, True).cuda()
-        decoder = LatentDecoder(9, True).cuda()
-        context_encoder = LatentEncoder(18, True).cuda()
-        return (encoder, decoder, context_encoder)
-
-    def get_metrics(self, args, std, mean, train_dat, test_dat):
-        def average_reconstruction(reconstructed, t_frag, z, z2):
-            return torch.mean(reconstructed)
-
-        def average_frag(reconstructed, t_frag, z, z2):
-            return torch.mean(t_frag)
-
-        return {
-            'average_reconstruction': average_reconstruction,
-            'average_frag': average_frag
-        }
-
-    def get_train_mode(self):
-        return train_latent
-
-class Skip1(Model):
-
-    def setup_parser(self, name, parser):
-        sub = parser.add_parser(name)
-        sub.add_argument('--input_channels',type=int,default=18)
-        sub.add_argument('--output_channels',type=int,default=9)
-        sub.add_argument('--frag_loss',default='mse')
-
-    def build_model(self, args):
-        m = FullSkipV1(
-            args.input_channels, 
-            args.output_channels
-        ).cuda()
-        return m
-
-    def get_metrics(self, args, std, mean, train_dat, test_dat):
-        def average_gt(yp,yt):
-            return torch.mean(yt)
-
-        def average_pred(yp,yt):
-            return torch.mean(yp)
-
-        return {
-            'average_gt': average_gt,
-            'average_pred': average_pred
-        }
-
-    def get_train_mode(self):
-        return train_latent_direct
+                val_metrics.clear()
 
 
 MODELS = {
-    'voxelnet': VoxelNet(),
-    'voxel3': Voxel3(),
-    'voxel4': Voxel4(),
-    'latent1': Latent1(),
-    'skip1': Skip1(),
+    'voxelnet': VoxelNet
 }
