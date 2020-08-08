@@ -12,7 +12,8 @@ from leadopt.models.voxel import VoxelFingerprintNet
 from leadopt.data_util import FragmentDataset, FingerprintDataset, LIG_TYPER,\
     REC_TYPER
 from leadopt.grid_util import get_batch
-from leadopt.metrics import mse, bce, tanimoto, cos, top_k_acc, average_support
+from leadopt.metrics import mse, bce, tanimoto, cos, top_k_acc,\
+    average_support, inside_support
 
 from config import partitions
 
@@ -40,7 +41,10 @@ LOSS_TYPE = {
     'direct': _direct_loss,
 
     # minimize distance to target and maximize distance to all other
-    'support_v1': average_support
+    'support_v1': average_support,
+
+    # support, limited to closer points
+    'support_v2': average_support,
 }
 
 
@@ -69,9 +73,14 @@ class RunLog(object):
 
 
 class MetricTracker(object):
-    def __init__(self, name):
+    def __init__(self, name, metric_fns):
         self._name = name
+        self._metric_fns = metric_fns
         self._metrics = {}
+
+    def evaluate(self, yp, yt):
+        for m in self._metric_fns:
+            self.update(m, self._metric_fns[m](yp, yt))
 
     def update(self, name, metric):
         if type(metric) is dict:
@@ -305,12 +314,13 @@ class VoxelNet(LeadoptModel):
 
         loss_fn = LOSS_TYPE[self._args['loss']](loss_fingerprints, dist_fn)
 
-        metrics = {
+        train_metrics = MetricTracker('train', {
             'all': top_k_acc(all_fingerprints, dist_fn, [1,5,10,50,100], pre='all')
-        }
-
-        train_metrics = MetricTracker('train')
-        val_metrics = MetricTracker('val')
+        })
+        val_metrics = MetricTracker('val', {
+            'all': top_k_acc(all_fingerprints, dist_fn, [1,5,10,50,100], pre='all'),
+            'val': top_k_acc(val_fingerprints, dist_fn, [1,5,10,50,100], pre='val'),
+        })
 
         best_loss = None
 
@@ -346,9 +356,7 @@ class VoxelNet(LeadoptModel):
                 opt.step()
 
                 train_metrics.update('loss', loss)
-                for m in metrics:
-                    train_metrics.update(m, metrics[m](predicted_fp, correct_fp))
-
+                train_metrics.evaluate(predicted_fp, correct_fp)
                 train_metrics.normalize(self._args['batch_size'])
                 self._log.log(train_metrics.get_all())
                 train_metrics.clear()
@@ -382,8 +390,7 @@ class VoxelNet(LeadoptModel):
                     loss = loss_fn(predicted_fp, correct_fp)
 
                     val_metrics.update('loss', loss)
-                    for m in metrics:
-                        val_metrics.update(m, metrics[m](predicted_fp, correct_fp))
+                    val_metrics.evaluate(predicted_fp, correct_fp)
 
                 val_metrics.normalize(self._args['test_steps'] * self._args['batch_size'])
                 self._log.log(val_metrics.get_all())

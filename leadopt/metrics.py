@@ -77,7 +77,7 @@ def average_support(fingerprints, fn):
             dist -= p_dist[i]
             dist *= -1
 
-            dist_n = F.sigmoid(dist)
+            dist_n = torch.sigmoid(dist)
 
             c[i] = torch.mean(dist_n)
 
@@ -86,6 +86,36 @@ def average_support(fingerprints, fn):
         return score
 
     return _average_support
+
+
+def inside_support(fingerprints, fn):
+    """
+    """
+    def _inside_support(yp, yt):
+        # correct distance
+        p_dist = broadcast_fn(fn, yp, yt)
+
+        c = torch.empty(yp.shape[0])
+        for i in range(yp.shape[0]):
+            # compute distance to all other fragments
+            dist = broadcast_fn(fn, yp[i].unsqueeze(0), fingerprints)
+
+            # shift distance so bad examples are positive
+            dist -= p_dist[i]
+            dist *= -1
+
+            # ignore labels that are further away
+            dist[dist < 0] = 0
+
+            dist_n = torch.sigmoid(dist)
+
+            c[i] = torch.mean(dist_n)
+
+        score = torch.mean(c)
+
+        return score
+
+    return _inside_support
 
 
 def top_k_acc(fingerprints, fn, k, pre=''):
