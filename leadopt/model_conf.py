@@ -300,6 +300,15 @@ class VoxelNet(LeadoptModel):
         val_fingerprints = fingerprints.for_smiles(val_smiles).cuda()
         all_fingerprints = fingerprints.for_smiles(all_smiles).cuda()
 
+        # fingerprint metrics
+        print('[*] Train smiles: %d' % len(train_smiles))
+        print('[*] Val smiles: %d' % len(val_smiles))
+        print('[*] All smiles: %d' % len(all_smiles))
+
+        print('[*] Train smiles: %d' % train_fingerprints.shape[0])
+        print('[*] Val smiles: %d' % val_fingerprints.shape[0])
+        print('[*] All smiles: %d' % all_fingerprints.shape[0])
+
         print('[*] Training...', flush=True)
         opt = torch.optim.Adam(
             self._models['voxel'].parameters(), lr=self._args['learning_rate'])
@@ -357,7 +366,6 @@ class VoxelNet(LeadoptModel):
 
                 train_metrics.update('loss', loss)
                 train_metrics.evaluate(predicted_fp, correct_fp)
-                train_metrics.normalize(self._args['batch_size'])
                 self._log.log(train_metrics.get_all())
                 train_metrics.clear()
 
@@ -392,7 +400,7 @@ class VoxelNet(LeadoptModel):
                     val_metrics.update('loss', loss)
                     val_metrics.evaluate(predicted_fp, correct_fp)
 
-                val_metrics.normalize(self._args['test_steps'] * self._args['batch_size'])
+                val_metrics.normalize(self._args['test_steps'])
                 self._log.log(val_metrics.get_all())
 
                 val_loss = val_metrics.get('loss')
