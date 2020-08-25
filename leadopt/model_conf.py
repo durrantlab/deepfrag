@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import wandb
 import tqdm
+import numpy as np
 
 from leadopt.models.voxel import VoxelFingerprintNet
 from leadopt.data_util import FragmentDataset, FingerprintDataset, LIG_TYPER,\
@@ -412,6 +413,66 @@ class VoxelNet(LeadoptModel):
                         self.save(save_path)
 
                 val_metrics.clear()
+
+    def run_test(self, save_path):
+        # load test dataset
+        test_dat = FragmentDataset(
+            self._args['fragments'],
+            rec_typer=REC_TYPER[self._args['rec_typer']],
+            lig_typer=LIG_TYPER[self._args['lig_typer']],
+            filter_rec=partitions.TEST,
+            fdist_min=self._args['fdist_min'], 
+            fdist_max=self._args['fdist_max'], 
+            fmass_min=self._args['fmass_min'], 
+            fmass_max=self._args['fmass_max'],
+            verbose=True
+        )
+
+        fingerprints = FingerprintDataset(self._args['fingerprints'])
+
+        self._models['voxel'].eval()
+
+        predicted_fp = np.zeros((
+            len(test_dat),
+            self._args['samples_per_example'],
+            self._args['output_size']))
+
+        smiles = [test_dat[i]['smiles'] for i in range(len(test_dat))]
+        correct_fp = fingerprints.for_smiles(smiles).numpy()
+    
+        # (example_idx, sample_idx)
+        queries = []
+        for i in range(len(test_dat)):
+            queries += [(i,x) for x in range(self._args['samples_per_example'])]
+
+        # run inference
+        pbar = tqdm.tqdm(
+            range(0, len(queries), self._args['batch_size']), desc='Inference')
+        for i in pbar:
+            batch = queries[i:i+self._args['batch_size']]
+
+            torch_grid, examples = get_batch(
+                test_dat,
+                self._args['rec_channels'],
+                self._args['lig_channels'], 
+                batch_size=self._args['batch_size'],
+                batch_set=[x[0] for x in batch],
+                width=self._args['grid_width'],
+                res=self._args['grid_res'],
+                ignore_receptor=self._args['ignore_receptor'],
+                ignore_parent=self._args['ignore_parent']
+            )
+
+            predicted = self._models['voxel'](torch_grid)
+
+            for j in range(len(batch)):
+                example_idx, sample_idx = batch[j]
+                predicted_fp[example_idx][sample_idx] = predicted[j].detach().cpu().numpy()
+
+        np.save(os.path.join(save_path, 'predicted_fp.npy'), predicted_fp)
+        np.save(os.path.join(save_path, 'correct_fp.npy'), correct_fp)
+
+        print('done.')
 
 
 MODELS = {

@@ -169,7 +169,7 @@ class FragmentDataset(Dataset):
     
     def __init__(self, fragment_file, rec_typer, lig_typer, filter_rec=None,
                  fdist_min=None, fdist_max=None, fmass_min=None,
-                 fmass_max=None, verbose=False):
+                 fmass_max=None, verbose=False, skip_remap=False):
         """Initializes the fragment dataset.
         
         Args:
@@ -177,6 +177,7 @@ class FragmentDataset(Dataset):
             rec_typer: function to map receptor rows to layer index
             lig_typer: function to map ligand rows to layer index
             filter_rec: list of receptor ids to use (or None to use all)
+            skip_remap: if True, don't prepare atom type information
 
         (filtering options):
             fdist_min: minimum fragment distance
@@ -185,6 +186,7 @@ class FragmentDataset(Dataset):
             fmass_max: maximum fragment mass (Da)
         """
         self.verbose = verbose
+        self._skip_remap = skip_remap
 
         self.rec = self._load_rec(fragment_file, rec_typer)
         self.frag = self._load_fragments(fragment_file, lig_typer)
@@ -205,8 +207,9 @@ class FragmentDataset(Dataset):
             r = tqdm.tqdm(r, desc='Remap receptor atoms')
 
         rec_remapped = np.zeros(len(rec_types)).astype(np.int32)
-        for i in r:
-            rec_remapped[i] = rec_typer(rec_types[i])
+        if not self._skip_remap:
+            for i in r:
+                rec_remapped[i] = rec_typer(rec_types[i])
 
         # create rec mapping
         rec_mapping = {}
@@ -239,7 +242,11 @@ class FragmentDataset(Dataset):
         frag_coords = frag_data[:,:3].astype(np.float32)
         frag_types = frag_data[:,3].astype(np.int32)
         
-        frag_remapped = np.vectorize(lig_typer)(frag_types)
+        frag_remapped = None
+        if self._skip_remap:
+            frag_remapped = np.zeros(len(frag_types))
+        else:
+            frag_remapped = np.vectorize(lig_typer)(frag_types)
         
         # find and save connection point
         r = range(len(frag_lookup))
