@@ -68,7 +68,8 @@ def mol_gridify(
         rot: (x,y,z,y) rotation quaternion
     """
 
-    r2 = 4  # fixed radius (^2)
+    # r2 = 4  # fixed radius (^2)
+    r2 = 3.0625  # TODO: Or is it 1.75 ^ 2 = 3.0625
     half_width = width / 2
 
     # TODO: Remove cruft below. Leaving here for now in case you need it.
@@ -108,12 +109,13 @@ def mol_gridify(
 
     for rotation_idx in range(len(grid)):  # Rotation
         for layer_idx in range(len(grid[rotation_idx])):
-            if layer_idx <= layer_offset:
+            if layer_idx < layer_offset:
                 continue
-            if layer_idx > layer_offset + num_layers_to_consider:
+            if layer_idx >= layer_offset + num_layers_to_consider:
                 continue
 
             print(rotation_idx, layer_idx)  # To indicate progress.
+
 
             for x in range(len(grid[rotation_idx][layer_idx])):
                 for y in range(len(grid[rotation_idx][layer_idx][x])):
@@ -199,12 +201,26 @@ def mol_gridify(
                             d2 = atom_inf[1]
 
                             # compute effect
+                            # Point type: 0 (effect(d,r) = exp((-2 * d^2) / r^2))
                             v = math.exp((-2 * d2) / r2)
 
                             # add effect
-                            grid[rotation_idx][layer_offset + ft][x][y][z] += v
+                            try:
+                                # Acc type: 0 (sum overlapping points)
+                                grid[rotation_idx][layer_offset + ft][x][y][z] += v
+                            except:
+                                import pdb; pdb.set_trace()
     return grid
 
+def flatten_tensor(grid, shape):
+    flat = []
+    for i1 in range(shape[0]):
+        for i2 in range(shape[1]):
+            for i3 in range(shape[2]):
+                for i4 in range(shape[3]):
+                    for i5 in range(shape[4]):
+                        flat.append(grid[i1][i2][i3][i4][i5])
+    return flat
 
 def make_tensor(shape):
     """Creates a tensor to store the grid data in.
@@ -237,12 +253,13 @@ def make_tensor(shape):
 
 def rand_rot():
     """Returns a random uniform quaternion rotation."""
-    # q = np.random.normal(size=4) # sample quaternion from normal distribution
-    # q = q / np.sqrt(np.sum(q**2)) # normalize
+    # Below if random.
+    # q = [random.random() for i in range(4)]
+    # l = math.sqrt(sum([v ** 2 for v in q]))
+    # q = [v / l for v in q]
 
-    q = [random.random() for i in range(4)]
-    l = math.sqrt(sum([v ** 2 for v in q]))
-    q = [v / l for v in q]
+    # Below if not random
+    q = [1, 0, 0, 0]
 
     return q
 
@@ -270,22 +287,33 @@ def get_raw_batch(
         res: grid resolution
     """
 
-    num_samples = 3 if num_samples is None else num_samples
+    num_samples = 1 if num_samples is None else num_samples  # default was 3
     width = 24 if width is None else width
     res = 0.5 if res is None else res
 
-    # TODO: Harrison to check...
-    parent_channels = len(set(p_types))
-    rec_channels = len(set(r_types))
+    # Channels (index -> what is in the channel):
+    # 0: parent carbon
+    # 1: parent nitrogen
+    # 2: parent oxygen
+    # 3: parent other (not including hydrogen)
+    # 4: receptor carbon
+    # 5: receptor nitrogen
+    # 6: receptor oxygen
+    # 7: receptor sulfur
+    # 8: receptor other (not including hydrogen)
+
+    parent_channels = 4  # len(set(p_types))
+    rec_channels = 5  # len(set(r_types))
 
     # TODO: For debugging
-    num_samples = 1
+    # num_samples = 1
 
     B = num_samples
     T = rec_channels + parent_channels
     N = width
 
-    grid = make_tensor((B, T, N, N, N))
+    shape = (B, T, N, N, N)
+    grid = make_tensor(shape)
 
     # for i in range(num_samples):
     rot = rand_rot()
@@ -299,4 +327,4 @@ def get_raw_batch(
         grid, r_coords, r_types, parent_channels, rec_channels, width, res, conn, rot,
     )
 
-    return grid
+    return flatten_tensor(grid, shape)

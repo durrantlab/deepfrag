@@ -3,6 +3,7 @@ rdkit/openbabel utility scripts
 """
 # __pragma__ ('skip')
 from rdkit import Chem
+
 # __pragma__ ('noskip')
 
 """?
@@ -19,7 +20,7 @@ def get_coords(mol):
     return coords
 
 
-def get_types(mol):
+def get_atomic_nums(mol):
     """Returns an array of atomic numbers from an rdkit mol."""
     return [mol.GetAtomWithIdx(i).GetAtomicNum() for i in range(mol.GetNumAtoms())]
 
@@ -125,12 +126,15 @@ def load_receptor(rec_path):
 
 
 def remove_hydrogens(m):
-    try:
-        for atom in m.GetAtoms():
-            atom.SetFormalCharge(0)
-        m = Chem.RemoveHs(m)
-    except:
-        m.atoms = [a for a in m.atoms if a.element != "H"]
+    # __pragma__ ('skip')
+    for atom in m.GetAtoms():
+        atom.SetFormalCharge(0)
+    m = Chem.RemoveHs(m)
+    # __pragma__ ('noskip')
+
+    """?
+    m.atoms = [a for a in m.atoms if a.element != "H"]
+    ?"""
 
     return m
 
@@ -193,15 +197,43 @@ def load_ligand(sdf):
     return lig, frags
 
 
-def mol_to_points(mol, atom_types):
+def mol_to_points(mol, atom_types, note_sulfur=True):
     """convert an rdkit mol to an array of coordinates and layers"""
 
-    atom_types = [6, 7, 8, 9, 15, 16, 17, 35, 53] if atom_types is None else atom_types
+    atom_types = (
+        [6, 7, 8, 16,]  # carbon  # nitrogen  # oxygen  # sulfur
+        if atom_types is None
+        else atom_types
+    )
 
     coords = get_coords(mol)
-    types = get_types(mol)
+    atomic_nums = get_atomic_nums(mol)
 
-    layers = [(atom_types.index(k) if k in atom_types else -1) for k in types]
+    layers = []
+    for t in atomic_nums:
+        if t == 1:
+            # Always ignore hydrogen. Should have already been ignored.
+            layers.append(-1)
+        elif t == 6:
+            # Carbon
+            layers.append(0)
+        elif t == 7:
+            # Nitrogen
+            layers.append(1)
+        elif t == 8:
+            # Oxygen
+            layers.append(2)
+        elif not note_sulfur:
+            # Not noting sulfur (e.g., ligand), but some other atom.
+            layers.append(3)
+        elif note_sulfur and t == 16:
+            # Noting sulfur (e.g., protein) and sulfur found.
+            layers.append(3)
+        elif note_sulfur:
+            # Noting sulfur (e.g., protein) but some other atom.
+            layers.append(4)
+
+    # layers = [(atom_types.index(k) if k in atom_types else -1) for k in types]
 
     # filter by existing layer
     # coords = coords[layers != -1]
@@ -214,7 +246,7 @@ def mol_to_points(mol, atom_types):
 
 def get_connection_point(frag):
     """return the coordinates of the dummy atom as a numpy array [x,y,z]"""
-    dummy_idx = get_types(frag).index(0)
+    dummy_idx = get_atomic_nums(frag).index(0)
     coords = get_coords(frag)[dummy_idx]
 
     return coords
@@ -244,8 +276,8 @@ def frag_dist_to_receptor_raw(coords, frag):
 def mol_array(mol):
     """convert an rdkit mol to an array of coordinates and atom types"""
     coords = get_coords(mol)
-    types = get_types(mol)
-    # types = np.array(get_types(mol)).reshape(-1, 1)
+    types = get_atomic_nums(mol)
+    # types = np.array(get_atomic_nums(mol)).reshape(-1, 1)
     # arr = np.concatenate([coords, types], axis=1)
     # import pdb; pdb.set_trace()
 

@@ -99,7 +99,13 @@ class Atom:
         :rtype: int
         """
 
-        return element_to_atomic_num[self.element]
+        elem = (
+            element_to_atomic_num[self.element]
+            if self.element in element_to_atomic_num
+            else 100
+        )
+
+        return elem
 
 
 class Mol:
