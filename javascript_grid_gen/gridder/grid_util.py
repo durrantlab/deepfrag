@@ -205,11 +205,8 @@ def mol_gridify(
                             v = math.exp((-2 * d2) / r2)
 
                             # add effect
-                            try:
-                                # Acc type: 0 (sum overlapping points)
-                                grid[rotation_idx][layer_offset + ft][x][y][z] += v
-                            except:
-                                import pdb; pdb.set_trace()
+                            # Acc type: 0 (sum overlapping points)
+                            grid[rotation_idx][layer_offset + ft][x][y][z] += v
     return grid
 
 def flatten_tensor(grid, shape):
