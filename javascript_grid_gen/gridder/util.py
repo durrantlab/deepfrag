@@ -223,15 +223,30 @@ def mol_to_points(mol, atom_types, note_sulfur=True):
         elif t == 8:
             # Oxygen
             layers.append(2)
+
+        # Below differs depending on protein or not.
         elif not note_sulfur:
             # Not noting sulfur (e.g., ligand), but some other atom.
             layers.append(3)
-        elif note_sulfur and t == 16:
-            # Noting sulfur (e.g., protein) and sulfur found.
-            layers.append(3)
-        elif note_sulfur:
-            # Noting sulfur (e.g., protein) but some other atom.
-            layers.append(4)
+        else:
+            # So supposed to note sulfur (protein)
+            if t == 16:
+                # Noting sulfur (e.g., protein) and sulfur found.
+                layers.append(3)
+            else:
+                # Noting sulfur (e.g., protein) but some other atom.
+                layers.append(4)
+
+
+        # elif not note_sulfur:
+        #     # Not noting sulfur (e.g., ligand), but some other atom.
+        #     layers.append(3)
+        # elif note_sulfur and t == 16:
+        #     # Noting sulfur (e.g., protein) and sulfur found.
+        #     layers.append(3)
+        # elif note_sulfur:
+        #     # Noting sulfur (e.g., protein) but some other atom.
+        #     layers.append(4)
 
     # layers = [(atom_types.index(k) if k in atom_types else -1) for k in types]
 

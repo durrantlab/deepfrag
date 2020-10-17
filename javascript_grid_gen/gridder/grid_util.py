@@ -116,7 +116,6 @@ def mol_gridify(
 
             print(rotation_idx, layer_idx)  # To indicate progress.
 
-
             for x in range(len(grid[rotation_idx][layer_idx])):
                 for y in range(len(grid[rotation_idx][layer_idx][x])):
                     for z in range(len(grid[rotation_idx][layer_idx][y])):
@@ -165,9 +164,7 @@ def mol_gridify(
 
                         # Get the closest atom.
                         pt = [tx, ty, tz]
-                        closest_atom_coords = tree.nearest_neighbor(
-                            pt, 1, []
-                        )
+                        closest_atom_coords = tree.nearest_neighbor(pt, 1, [])
 
                         # If the closest one is farther than r2 away,
                         # continue.
@@ -209,6 +206,7 @@ def mol_gridify(
                             grid[rotation_idx][layer_offset + ft][x][y][z] += v
     return grid
 
+
 def flatten_tensor(grid, shape):
     flat = []
     for i1 in range(shape[0]):
@@ -218,6 +216,7 @@ def flatten_tensor(grid, shape):
                     for i5 in range(shape[4]):
                         flat.append(grid[i1][i2][i3][i4][i5])
     return flat
+
 
 def make_tensor(shape):
     """Creates a tensor to store the grid data in.
@@ -267,9 +266,9 @@ def get_raw_batch(
     p_coords,
     p_types,
     conn,
-    num_samples,  # =3,
-    width,  # =24,
-    res,  # =0.5,
+    num_samples,  # =3, VAL: 1
+    width,  # =24, VAL: 24
+    res,  # =0.5, VAL: 0.75
 ):
     """Sample a raw batch with provided atom coordinates.
 
@@ -305,9 +304,9 @@ def get_raw_batch(
     # TODO: For debugging
     # num_samples = 1
 
-    B = num_samples
-    T = rec_channels + parent_channels
-    N = width
+    B = num_samples # 1
+    T = rec_channels + parent_channels # 9
+    N = width # 24
 
     shape = (B, T, N, N, N)
     grid = make_tensor(shape)

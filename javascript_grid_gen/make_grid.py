@@ -5,7 +5,11 @@ Create a protein/ligand grid. Can compile to JavaScript using Transcrypt.
 from gridder.util import load_receptor, load_ligand, mol_to_points, get_connection_point
 from gridder.grid_util import get_raw_batch
 from gridder.fake_rdkit import Point
+
+# __pragma__ ('skip')
 import json
+
+# __pragma__ ('noskip')
 
 """?
 from gridder.example_data import receptor_pdb, ligand_sdf
@@ -25,6 +29,11 @@ from gridder.example_data import receptor_pdb, ligand_sdf
 # - frag_smiles:    [smiles]
 # - frag_mass:      [mass]
 # - frag_dist:      [dist]
+
+"""?
+def get_test_data():
+    return receptor_pdb, ligand_sdf
+?"""
 
 
 def make_grid(receptor: str, ligand: str, grid_center: list) -> None:
@@ -46,13 +55,20 @@ def make_grid(receptor: str, ligand: str, grid_center: list) -> None:
     # load ligand and receptor
 
     rec = load_receptor(receptor)
+
+    # If SDF
     lig, frags = load_ligand(ligand)  # List of tuples, (parent, frag)
+
+    # If PDB
+    # l = load_receptor(ligand)
+    # lig, frags = None, [(l, None)]  # to get pdb to work
 
     # compute shared receptor coords and layers
     rec_coords, rec_layers = mol_to_points(rec, None, note_sulfur=True)
 
     # Only keep the first fragment. A JDD addition.
-    frags = frags[:1]
+    # frags = frags[:1]
+    frags = [frags[0]]
 
     for parent, frag in frags:
 
@@ -80,29 +96,38 @@ def make_grid(receptor: str, ligand: str, grid_center: list) -> None:
             parent_layers,
             conn,
             1,
-            width=24,
-            res=0.75,
+            24,  # width=
+            0.75,  # res=
         )
 
+        # __pragma__ ('skip')
         print(json.dumps(grid))
+        # __pragma__ ('noskip')
+
+        """?
+        # print(str(grid))
+        return grid
+        ?"""
 
 
 if __name__ == "__main__":
     # __pragma__ ('skip')
-    make_grid(
-        # "./1b6l/1b6l_protein.pdb",
-        "11gs/11gs_protein.pdb",
-        # "./1b6l/1b6l_ligand.sdf",
-        "11gs/11gs_ligand.minus-grid0-frag.sdf",
-        # [0.512000, 3.311000, 12.006000],
-        [14.62, 9.944, 24.471],
+    print(
+        make_grid(
+            # "./1b6l/1b6l_protein.pdb",
+            "11gs/11gs_protein.pdb",
+            # "./1b6l/1b6l_ligand.sdf",
+            "11gs/11gs_ligand.minus-grid0-frag.sdf",
+            # [0.512000, 3.311000, 12.006000],
+            [14.62, 9.944, 24.471],
+        )
     )
     # __pragma__ ('noskip')
 
     """?
-    make_grid(
-        receptor_pdb,
-        ligand_sdf,
-        [14.62, 9.944, 24.471],
-    )
+    # make_grid(
+    #     receptor_pdb,
+    #     ligand_sdf,
+    #     [14.62, 9.944, 24.471],
+    # )
     ?"""

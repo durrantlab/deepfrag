@@ -1,3 +1,4 @@
+source activate Python36
 rm __target__/*
 transcrypt --ecom make_grid.py
 cp index.html __target__/
