@@ -130,8 +130,12 @@ class LeadoptModel(object):
         """
         raise NotImplementedError()
 
+    @staticmethod
+    def get_defaults():
+        return {}
+
     @classmethod
-    def load(cls, path):
+    def load(cls, path, device='cuda'):
         """Load model configuration saved with save().
 
         Call LeadoptModel.load to infer model type.
@@ -145,15 +149,21 @@ class LeadoptModel(object):
 
         model_type = MODELS[args['version']] if cls is LeadoptModel else cls
 
-        instance = model_type(args, with_log=False)
+        default_args = model_type.get_defaults()
+        for k in default_args:
+            if not k in args:
+                args[k] = default_args[k]
+
+        instance = model_type(args, device=device, with_log=False)
         for name in instance._models:
             model_path = os.path.join(path, '%s.pt' % name)
-            instance._models[name].load_state_dict(torch.load(model_path))
+            instance._models[name].load_state_dict(torch.load(model_path, map_location=torch.device(device)))
 
         return instance
 
-    def __init__(self, args, with_log=True):
+    def __init__(self, args, device='cuda', with_log=True):
         self._args = args
+        self._device = torch.device(device)
         self._models = self.init_models()
         if with_log:
             wandb_project = None
@@ -239,11 +249,11 @@ class VoxelNet(LeadoptModel):
         sub.add_argument('--ignore_parent', action='store_true', default=False)
         sub.add_argument('-rec_typer', required=True, choices=[k for k in REC_TYPER])
         sub.add_argument('-lig_typer', required=True, choices=[k for k in LIG_TYPER])
-        sub.add_argument('-rec_channels', required=True, type=int)
-        sub.add_argument('-lig_channels', required=True, type=int)
+        # sub.add_argument('-rec_channels', required=True, type=int)
+        # sub.add_argument('-lig_channels', required=True, type=int)
 
         # model parameters
-        sub.add_argument('--in_channels', type=int, default=18)
+        # sub.add_argument('--in_channels', type=int, default=18)
         sub.add_argument('--output_size', type=int, default=2048)
         sub.add_argument('--pad', default=False, action='store_true')
         sub.add_argument('--blocks', nargs='+', type=int, default=[32,64])
@@ -252,14 +262,28 @@ class VoxelNet(LeadoptModel):
         sub.add_argument('--dist_fn', default='mse', choices=[k for k in DIST_FN])
         sub.add_argument('--loss', default='direct', choices=[k for k in LOSS_TYPE])
 
+    @staticmethod
+    def get_defaults():
+        return {
+            'point_radius': 1,
+            'point_type': 0,
+            'acc_type': 0
+        }
+
     def init_models(self):
+        in_channels = 0
+        if not self._args['ignore_receptor']:
+            in_channels += REC_TYPER[self._args['rec_typer']].size()
+        if not self._args['ignore_parent']:
+            in_channels += LIG_TYPER[self._args['lig_typer']].size()
+
         voxel = VoxelFingerprintNet(
-            in_channels=self._args['in_channels'],
+            in_channels=in_channels,
             output_size=self._args['output_size'],
             blocks=self._args['blocks'],
             fc=self._args['fc'],
             pad=self._args['pad']
-        ).cuda()
+        ).to(self._device)
         return {'voxel': voxel}
 
     def train(self, save_path=None):
@@ -343,14 +367,15 @@ class VoxelNet(LeadoptModel):
             for step in train_pbar:
                 torch_grid, examples = get_batch(
                     train_dat,
-                    self._args['rec_channels'],
-                    self._args['lig_channels'], 
                     batch_size=self._args['batch_size'],
                     batch_set=None,
                     width=self._args['grid_width'],
                     res=self._args['grid_res'],
                     ignore_receptor=self._args['ignore_receptor'],
-                    ignore_parent=self._args['ignore_parent']
+                    ignore_parent=self._args['ignore_parent'],
+                    point_radius=self._args['point_radius'],
+                    point_type=self._args['point_type'],
+                    acc_type=self._args['acc_type']
                 )
 
                 smiles = [example['smiles'] for example in examples]
@@ -380,14 +405,15 @@ class VoxelNet(LeadoptModel):
                 for step in val_pbar:
                     torch_grid, examples = get_batch(
                         val_dat,
-                        self._args['rec_channels'],
-                        self._args['lig_channels'], 
                         batch_size=self._args['batch_size'],
                         batch_set=None,
                         width=self._args['grid_width'],
                         res=self._args['grid_res'],
                         ignore_receptor=self._args['ignore_receptor'],
-                        ignore_parent=self._args['ignore_parent']
+                        ignore_parent=self._args['ignore_parent'],
+                        point_radius=self._args['point_radius'],
+                        point_type=self._args['point_type'],
+                        acc_type=self._args['acc_type']
                     )
 
                     smiles = [example['smiles'] for example in examples]
@@ -453,14 +479,15 @@ class VoxelNet(LeadoptModel):
 
             torch_grid, examples = get_batch(
                 test_dat,
-                self._args['rec_channels'],
-                self._args['lig_channels'], 
                 batch_size=self._args['batch_size'],
                 batch_set=[x[0] for x in batch],
                 width=self._args['grid_width'],
                 res=self._args['grid_res'],
                 ignore_receptor=self._args['ignore_receptor'],
-                ignore_parent=self._args['ignore_parent']
+                ignore_parent=self._args['ignore_parent'],
+                point_radius=self._args['point_radius'],
+                point_type=self._args['point_type'],
+                acc_type=self._args['acc_type']
             )
 
             predicted = self._models['voxel'](torch_grid)
