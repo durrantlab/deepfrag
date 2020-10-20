@@ -72,8 +72,9 @@ def make_grid(receptor: str, ligand: str, grid_center: list) -> None:
 
     for parent, frag in frags:
 
+        # use ligand directly (already fragmented)
         # compute parent coords and layers
-        parent_coords, parent_layers = mol_to_points(parent, None, note_sulfur=False)
+        parent_coords, parent_layers = mol_to_points(lig, None, note_sulfur=False)
 
         # find connection point
         # __pragma__ ('skip')
@@ -101,7 +102,7 @@ def make_grid(receptor: str, ligand: str, grid_center: list) -> None:
         )
 
         # __pragma__ ('skip')
-        print(json.dumps(grid))
+        return json.dumps(grid)
         # __pragma__ ('noskip')
 
         """?
@@ -112,7 +113,7 @@ def make_grid(receptor: str, ligand: str, grid_center: list) -> None:
 
 if __name__ == "__main__":
     # __pragma__ ('skip')
-    print(
+    grid = (
         make_grid(
             # "./1b6l/1b6l_protein.pdb",
             "11gs/11gs_protein.pdb",
@@ -122,6 +123,7 @@ if __name__ == "__main__":
             [14.62, 9.944, 24.471],
         )
     )
+    open('./11gs/mol_gridify2.json', 'w').write(grid)
     # __pragma__ ('noskip')
 
     """?
