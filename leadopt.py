@@ -21,7 +21,7 @@ def main():
 
     parser.add_argument('-r', '--receptor', required=True, help='Receptor file (.pdb)')
     parser.add_argument('-l', '--ligand', required=True, help='Ligand file (.sdf)')
-    
+
     parser.add_argument('-n', '--num_samples', type=int, default=16, help='Number of random rotation samples to use per prediction (default: 16)')
     parser.add_argument('-k', '--num_suggestions', type=int, default=25, help='Number of suggestions per fragment')
 
@@ -37,11 +37,11 @@ def main():
 
     # run infer step
     res = infer_all(
-        model=m, 
-        fingerprints=fingerprints, 
-        smiles=smiles, 
-        rec_path=args.receptor, 
-        lig_path=args.ligand, 
+        model=m,
+        fingerprints=fingerprints,
+        smiles=smiles,
+        rec_path=args.receptor,
+        lig_path=args.ligand,
         num_samples=args.num_samples,
         k=args.num_suggestions
     )

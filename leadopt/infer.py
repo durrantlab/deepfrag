@@ -27,7 +27,7 @@ def get_nearest_fp(fingerprints, fp, k=10):
     d = mse(fingerprints, fp)
     arr = [(i,d[i]) for i in range(len(d))]
     arr = sorted(arr, key=lambda x: x[1])
-    
+
     return arr[:k]
 
 
@@ -38,6 +38,7 @@ def infer_all(model, fingerprints, smiles, rec_path, lig_path, num_samples=16, k
     # load ligand and receptor
     lig, frags = util.load_ligand(lig_path)
     rec = util.load_receptor(rec_path)
+
 
     # compute shared receptor coords and layers
     rec_coords, rec_layers = util.mol_to_points(rec)

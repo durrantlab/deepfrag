@@ -33,7 +33,7 @@ def gpu_gridify(grid, atom_num, atom_coords, atom_mask, layer_offset,
                 point_radius, point_type, acc_type
                 ):
     """Adds atoms to the grid in a GPU kernel.
-    
+
     This kernel converts atom coordinate information to 3d voxel information.
     Each GPU thread is responsible for one specific grid point. This function
     receives a list of atomic coordinates and atom layers and simply iterates
@@ -71,12 +71,12 @@ def gpu_gridify(grid, atom_num, atom_coords, atom_mask, layer_offset,
         rot: (x,y,z,y) rotation quaternion
     """
     x,y,z = numba.cuda.grid(3)
-    
+
     # center around origin
     tx = x - (width/2)
     ty = y - (width/2)
     tz = z - (width/2)
-    
+
     # scale by resolution
     tx = tx * res
     ty = ty * res
@@ -87,36 +87,36 @@ def gpu_gridify(grid, atom_num, atom_coords, atom_mask, layer_offset,
     ax = rot[1]
     ay = rot[2]
     az = rot[3]
-    
+
     bw = 0
     bx = tx
     by = ty
     bz = tz
-    
+
     # multiply by rotation vector
     cw = (aw * bw) - (ax * bx) - (ay * by) - (az * bz)
     cx = (aw * bx) + (ax * bw) + (ay * bz) - (az * by)
     cy = (aw * by) + (ay * bw) + (az * bx) - (ax * bz)
     cz = (aw * bz) + (az * bw) + (ax * by) - (ay * bx)
-    
+
     # multiply by conjugate
     # dw = (cw * aw) - (cx * (-ax)) - (cy * (-ay)) - (cz * (-az))
     dx = (cw * (-ax)) + (cx * aw) + (cy * (-az)) - (cz * (-ay))
     dy = (cw * (-ay)) + (cy * aw) + (cz * (-ax)) - (cx * (-az))
     dz = (cw * (-az)) + (cz * aw) + (cx * (-ay)) - (cy * (-ax))
-    
+
     # apply translation vector
     tx = dx + center[0]
     ty = dy + center[1]
     tz = dz + center[2]
-    
+
     i = 0
     while i < atom_num:
         # fetch atom
         fx, fy, fz = atom_coords[i]
         mask = atom_mask[i]
         i += 1
-        
+
         # invisible atoms
         if mask == 0:
             continue
@@ -197,7 +197,7 @@ def gpu_gridify(grid, atom_num, atom_coords, atom_mask, layer_offset,
 def mol_gridify(grid, atom_coords, atom_mask, layer_offset, batch_idx,
                 width, res, center, rot, point_radius, point_type, acc_type):
     """Wrapper around gpu_gridify.
-    
+
     (See gpu_gridify() for details)
     """
     dw = ((width - 1) // GPU_DIM) + 1
@@ -218,28 +218,28 @@ def make_tensor(shape):
     """
     # get cuda context
     ctx = numba.cuda.cudadrv.driver.driver.get_active_context()
-    
+
     # setup tensor on gpu
     t = torch.zeros(size=shape, dtype=torch.float32).cuda()
 
     memory = numba.cuda.cudadrv.driver.MemoryPointer(ctx, ctypes.c_ulong(t.data_ptr()), t.numel() * 4)
     cuda_arr = numba.cuda.cudadrv.devicearray.DeviceNDArray(
-        t.size(), 
-        [i*4 for i in t.stride()], 
-        np.dtype('float32'), 
-        gpu_data=memory, 
+        t.size(),
+        [i*4 for i in t.stride()],
+        np.dtype('float32'),
+        gpu_data=memory,
         stream=torch.cuda.current_stream().cuda_stream
     )
-    
+
     return (t, cuda_arr)
-        
+
 
 def rand_rot():
     """Returns a random uniform quaternion rotation."""
     q = np.random.normal(size=4) # sample quaternion from normal distribution
     q = q / np.sqrt(np.sum(q**2)) # normalize
     return q
-    
+
 
 def get_batch(data, batch_size=16, batch_set=None, width=48, res=0.5,
               ignore_receptor=False, ignore_parent=False, fixed_rot=None,
@@ -276,10 +276,10 @@ def get_batch(data, batch_size=16, batch_set=None, width=48, res=0.5,
 
     # create a tensor with shared memory on the gpu
     torch_grid, cuda_grid = make_tensor((batch_size, dim, width, width, width))
-    
+
     if batch_set is None:
         batch_set = np.random.choice(len(data), size=batch_size, replace=False)
-    
+
     examples = [data[idx] for idx in batch_set]
 
     for i in range(len(examples)):
@@ -320,7 +320,7 @@ def get_batch(data, batch_size=16, batch_set=None, width=48, res=0.5,
             )
         else:
             mol_gridify(
-                cuda_grid, 
+                cuda_grid,
                 example['p_coords'],
                 example['p_types'],
                 layer_offset=0,
@@ -347,7 +347,7 @@ def get_batch(data, batch_size=16, batch_set=None, width=48, res=0.5,
                 point_type=point_type,
                 acc_type=acc_type
             )
-        
+
     return torch_grid, examples
 
 
@@ -371,6 +371,7 @@ def get_raw_batch(r_coords, r_types, p_coords, p_types, rec_typer, lig_typer,
     B = num_samples
     T = rec_typer.size() + lig_typer.size()
     N = width
+
     torch_grid, cuda_grid = make_tensor((B,T,N,N,N))
 
     r_mask = np.zeros(len(r_types), dtype=np.uint32)
