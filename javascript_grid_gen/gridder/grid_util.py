@@ -3,256 +3,37 @@ Contains code for gpu-accelerated grid generation.
 """
 
 import math
-import random
-
-# __pragma__ ('skip')
-from .kdtrees import KDTree
-
-# __pragma__ ('noskip')
-
-"""?
-from .gridder.kdtrees._kdtree import KDTree
-?"""
 
 GPU_DIM = 8
 
 
-def coord_to_key(c: list) -> int:
-    """Converts a 3D coordinate to a hash.
-
-    :param c: The 3D coordinates.
-    :type c: list
-    :return: The hash.
-    :rtype: int
-    """
-    return 1000 * round(c[0] + 1000 * (c[1] + c[2] * 1000))
-
-
-def mol_gridify(
-    grid,
-    atom_coords,
-    atom_layers,
-    layer_offset,
-    num_layers_to_consider,
-    width,
-    res,
-    center,
-    rot,
-):
-    """Adds atoms to the tensor. Converts atom coordinate information to 3d
-    voxel information. This function receives a list of atomic coordinates and
-    atom layers and simply iterates over the list to find nearby atoms and add
-    their effect.
-
-    Voxel information is stored in a 5D tensor of type: BxTxNxNxN where:
-        B = batch size
-        T = number of atom types (receptor + ligand)
-        N = grid width (in gridpoints)
-
-    The layer_offset parameter can be set to specify a fixed offset to add to
-    each atom_layer item.
-
-    Args:
-        grid: Tensor where grid information is stored
-        atom_coords: array containing (x,y,z) atom coordinates
-        atom_layers: array containing (idx) offsets that specify which layer to
-            store this atom. (-1 can be used to ignore an atom)
-        layer_offset: a fixed ofset added to each atom layer index
-        num_layers_to_consider: index specifiying which batch to write
-            information to
-        width: number of grid points in each dimension
-        res: distance between neighboring grid points in angstroms
-            (1 == gridpoint every angstrom)
-            (0.5 == gridpoint every half angstrom, e.g. tighter grid)
-        center: (x,y,z) coordinate of grid center
-        rot: (x,y,z,y) rotation quaternion
-    """
-
-    # r2 = 4  # fixed radius (^2)
-    r2 = 3.0625  # TODO: Or is it 1.75 ^ 2 = 3.0625
-    half_width = width / 2
-
-    # TODO: Remove cruft below. Leaving here for now in case you need it.
-
-    # Organize the data by layer.
-    # data = {}
-    # for i, atom_layer in enumerate(atom_layers):
-    #     if not atom_layer in data:
-    #         data[atom_layer] = []
-    #     atom_coord = atom_coords[i]
-    #     data[atom_layer].append([atom_coord.x, atom_coord.y, atom_coord.z])
-
-    # Organize the data by layer.
-    # data = {}
-    # for i, atom_layer in enumerate(atom_layers):
-    #     if not atom_layer in data:
-    #         data[atom_layer] = []
-    #     atom_coord = atom_coords[i]
-    #     data[atom_layer].append([atom_coord.x, atom_coord.y, atom_coord.z])
-
-    # Replace with a tree
-    # for i in data.keys():
-    #     coors = data[i]
-    #     data[i] = KDTree.initialize(coors, 3, 0, None)
-
-    # First generate a kdtree of the atom coordinates. To speed calculate on
-    # CPU. Using pure-python KDTrees implementation for conversion to
-    # javascript later.
-    data = [[c.x, c.y, c.z] for i, c in enumerate(atom_coords)]
-    tree = KDTree.initialize(data, 3, 0, None)
-
-    # Make a dictionary to map the coordinates (hash) to the atom layer for
-    # fast lookup later.
-    layers = {}
-    for i, c in enumerate(data):
-        layers[coord_to_key(c)] = atom_layers[i]
-
-    for rotation_idx in range(len(grid)):  # Rotation
-        for layer_idx in range(len(grid[rotation_idx])):
-            if layer_idx < layer_offset:
-                continue
-            if layer_idx >= layer_offset + num_layers_to_consider:
-                continue
-
-            print(rotation_idx, layer_idx)  # To indicate progress.
-
-            for x in range(len(grid[rotation_idx][layer_idx])):
-                for y in range(len(grid[rotation_idx][layer_idx][x])):
-                    for z in range(len(grid[rotation_idx][layer_idx][y])):
-                        # center around origin
-                        tx = x - half_width
-                        ty = y - half_width
-                        tz = z - half_width
-
-                        # scale by resolution
-                        tx = tx * res
-                        ty = ty * res
-                        tz = tz * res
-
-                        # apply rotation vector
-                        aw = rot[0]
-                        ax = rot[1]
-                        ay = rot[2]
-                        az = rot[3]
-
-                        # bw = 0
-                        bx = tx
-                        by = ty
-                        bz = tz
-
-                        # multiply by rotation vector
-                        # cw = (aw * bw) - (ax * bx) - (ay * by) - (az * bz)
-                        # cx = (aw * bx) + (ax * bw) + (ay * bz) - (az * by)
-                        # cy = (aw * by) + (ay * bw) + (az * bx) - (ax * bz)
-                        # cz = (aw * bz) + (az * bw) + (ax * by) - (ay * bx)
-
-                        cw = -(ax * bx) - (ay * by) - (az * bz)
-                        cx = (aw * bx) + (ay * bz) - (az * by)
-                        cy = (aw * by) + (az * bx) - (ax * bz)
-                        cz = (aw * bz) + (ax * by) - (ay * bx)
-
-                        # multiply by conjugate
-                        # dw = (cw * aw) - (cx * (-ax)) - (cy * (-ay)) - (cz * (-az))
-                        dx = (cw * (-ax)) + (cx * aw) + (cy * (-az)) - (cz * (-ay))
-                        dy = (cw * (-ay)) + (cy * aw) + (cz * (-ax)) - (cx * (-az))
-                        dz = (cw * (-az)) + (cz * aw) + (cx * (-ay)) - (cy * (-ax))
-
-                        # apply translation vector
-                        tx = dx + center.x  # [0]
-                        ty = dy + center.y  # [1]
-                        tz = dz + center.z  # [2]
-
-                        # Get the closest atom.
-                        pt = [tx, ty, tz]
-                        closest_atom_coords = tree.nearest_neighbor(pt, 1, [])
-
-                        # If the closest one is farther than r2 away,
-                        # continue.
-                        if closest_atom_coords[0][1] > r2:
-                            continue
-
-                        # Get other closest atoms (expanding out).
-                        closest_atom_coords = tree.proximal_neighbor(pt, r2, [])
-
-                        for atom_inf in closest_atom_coords:
-                            # Get the atom type.
-                            ft = layers[coord_to_key(atom_inf[0])]
-
-                            # invisible atoms
-                            if ft == -1:
-                                continue
-
-                            # fx, fy, fz = atom_inf[0]  # atom_coords[i]
-                            # i += 1
-
-                            # quick cube bounds check. TODO: not needed now
-                            # that using kdtree?
-                            # if (
-                            #     abs(fx - tx) > r2
-                            #     or abs(fy - ty) > r2
-                            #     or abs(fz - tz) > r2
-                            # ):
-                            #     continue
-
-                            # compute squared distance to atom
-                            d2 = atom_inf[1]
-
-                            # compute effect
-                            # Point type: 0 (effect(d,r) = exp((-2 * d^2) / r^2))
-                            v = math.exp((-2 * d2) / r2)
-
-                            # add effect
-                            # Acc type: 0 (sum overlapping points)
-                            grid[rotation_idx][layer_offset + ft][x][y][z] += v
-    return grid
-
-
-def grid_to_real(x,y,z,width,res,center,rot):
+def grid_to_real_no_rot(x, y, z, half_width, res, center):  # , rot):
     """Convert a grid (x,y,z) coordinate to real world coordinate."""
-    half_width = width / 2
+
+    return (
+        grid_to_real_no_rot_one_axis(x, half_width, res, center.x),
+        grid_to_real_no_rot_one_axis(y, half_width, res, center.y),
+        grid_to_real_no_rot_one_axis(z, half_width, res, center.z),
+    )
+
+
+def grid_to_real_no_rot_one_axis(val_axis, half_width, res, center_axis):  # , rot):
+    """Convert a grid value along an axis coordinate to real world coordinate
+    along that axis."""
 
     # Center around origin.
-    tx = x - half_width
-    ty = y - half_width
-    tz = z - half_width
+    tval_axis = val_axis - half_width
 
     # Scale by resolution.
-    tx = tx * res
-    ty = ty * res
-    tz = tz * res
-
-    # Apply rotation vector.
-    aw = rot[0]
-    ax = rot[1]
-    ay = rot[2]
-    az = rot[3]
-
-    # bw = 0
-    bx = tx
-    by = ty
-    bz = tz
-
-    # Multiply by rotation vector.
-    cw = -(ax * bx) - (ay * by) - (az * bz)
-    cx = (aw * bx) + (ay * bz) - (az * by)
-    cy = (aw * by) + (az * bx) - (ax * bz)
-    cz = (aw * bz) + (ax * by) - (ay * bx)
-
-    # Multiply by conjugate.
-    # dw = (cw * aw) - (cx * (-ax)) - (cy * (-ay)) - (cz * (-az))
-    dx = (cw * (-ax)) + (cx * aw) + (cy * (-az)) - (cz * (-ay))
-    dy = (cw * (-ay)) + (cy * aw) + (cz * (-ax)) - (cx * (-az))
-    dz = (cw * (-az)) + (cz * aw) + (cx * (-ay)) - (cy * (-ax))
+    tval_axis = tval_axis * res
 
     # Apply translation vector.
-    tx = dx + center.x  # [0]
-    ty = dy + center.y  # [1]
-    tz = dz + center.z  # [2]
+    tval_axis = tval_axis + center_axis  # [0]
 
-    return (tx, ty, tz)
+    return tval_axis
 
 
-def filter_atoms(atom_coords, atom_layers, width, res, center, rot):
+def filter_atoms_no_rot(atom_coords, atom_layers, width, res, center):
     """Filter atoms based on a grid bounding box.
 
     Returns (filt_coords, filt_layers).
@@ -260,28 +41,28 @@ def filter_atoms(atom_coords, atom_layers, width, res, center, rot):
     PAD = 1.75
 
     # Compute grid extremes.
-    ax, ay, az = grid_to_real(0,0,0,width,res,center,rot)
-    bx, by, bz = grid_to_real(width-1,width-1,width-1,width,res,center,rot)
+    half_width = width / 2
+    ax, ay, az = grid_to_real_no_rot(0, 0, 0, half_width, res, center)
+    bx, by, bz = grid_to_real_no_rot(
+        width - 1, width - 1, width - 1, half_width, res, center
+    )
 
     filt_coords = []
     filt_layers = []
 
-    # See TODO below.
-    assert rot == [1,0,0,0]
-
     for i in range(len(atom_coords)):
-        x,y,z = atom_coords[i]
-        
+        x, y, z = atom_coords[i]
+
         # TODO: this bounds check only works for a rotation vector of: [1,0,0,0]
         # An alternative approach is to define real_to_grid and compute the
         # nearest gridpoint for each atom.
         if (
-            x > ax - PAD and
-            y > ay - PAD and
-            z > az - PAD and
-            x < bx + PAD and
-            y < by + PAD and
-            z < bz + PAD
+            x > ax - PAD
+            and y > ay - PAD
+            and z > az - PAD
+            and x < bx + PAD
+            and y < by + PAD
+            and z < bz + PAD
         ):
             filt_coords.append(atom_coords[i])
             filt_layers.append(atom_layers[i])
@@ -289,74 +70,53 @@ def filter_atoms(atom_coords, atom_layers, width, res, center, rot):
     return filt_coords, filt_layers
 
 
-def mol_gridify2(
+def mol_gridify2_one_channel(
     grid,
-    atom_coords,
-    atom_layers,
     layer_offset,
-    num_layers_to_consider,
+    abs_channel_to_consider,
     width,
     res,
     center,
-    rot,
-    ):
-    # Filter atoms based on the grid bounding box.
-    filt_coords, filt_layers = filter_atoms(
-        atom_coords,
-        atom_layers,
-        width,
-        res,
-        center,
-        rot
-    )
+    filt_coords,
+    filt_layers,
+):
 
     # Fixed atom radius (r = 1.75).
     r = 1.75
     r2 = r * r
     half_width = width / 2
 
-    # Assume rectangular tensor.
-    d_batch = len(grid)
-    d_layers = len(grid[0])
+    # Now compare the grid point location to each atom position.
+    for i in range(len(filt_coords)):
+        ft_with_offset = layer_offset + filt_layers[i]
+        if ft_with_offset != abs_channel_to_consider:
+            continue
 
-    # Currently we assume the grid has a single batch entry and we will write to
-    # this index. To support multi-sample grids, we would probably add a
-    # "batch_index" parameter here and invoke mol_gridify multiple times like
-    # in the original grid_util.
-    assert d_batch == 1
+        nx, ny, nz = filt_coords[i]
 
-    # Iterate over grid points.
-    for x in range(width):
-        print(x)
-        for y in range(width):
-            for z in range(width):
+        # Iterate over grid points.
+        rng = range(width)
+        for x in rng:
+            # Compute the effective grid point position.
+            tx = grid_to_real_no_rot_one_axis(x, half_width, res, center.x)
+            d2_x_prt = (nx - tx) ** 2
+            for y in rng:
                 # Compute the effective grid point position.
-                tx, ty, tz = grid_to_real(x,y,z,width,res,center,rot)
-
-                # Now compare the grid point location to each atom position.
-                for i in range(len(filt_coords)):
-                    nx, ny, nz = filt_coords[i]
-
-                    # print(nx,ny,nz)
+                ty = grid_to_real_no_rot_one_axis(y, half_width, res, center.y)
+                d2_x_prt_plus_d2_y_prt = d2_x_prt + (ny - ty) ** 2
+                for z in rng:
+                    # Compute the effective grid point position.
+                    tz = grid_to_real_no_rot_one_axis(z, half_width, res, center.z)
 
                     # Distance squared.
-                    d2 = (nx-tx)**2 + (ny-ty)**2 + (nz-tz)**2
+                    d2 = d2_x_prt_plus_d2_y_prt + (nz - tz) ** 2
 
                     if d2 > r2:
                         continue
 
-                    ft = filt_layers[i]
-
-                    # Compute effect.
-                    # Point type: 0 (effect(d,r) = exp((-2 * d^2) / r^2))
-                    v = math.exp((-2 * d2) / r2)
-
-                    # add effect
-                    # Acc type: 0 (sum overlapping points)
-
                     # TODO: if we implement multi-sample grids, replace 0 with
                     # batch_index or similar.
-                    grid[0][layer_offset + ft][x][y][z] += v
+                    grid[0][ft_with_offset][x][y][z] += math.exp((-2 * d2) / r2)
 
     return grid
 
@@ -401,20 +161,7 @@ def make_tensor(shape):
     return t
 
 
-def rand_rot():
-    """Returns a random uniform quaternion rotation."""
-    # Below if random.
-    # q = [random.random() for i in range(4)]
-    # l = math.sqrt(sum([v ** 2 for v in q]))
-    # q = [v / l for v in q]
-
-    # Below if not random
-    q = [1, 0, 0, 0]
-
-    return q
-
-
-def get_raw_batch(
+def get_raw_batch_one_channel(
     r_coords,
     r_types,
     p_coords,
@@ -423,6 +170,7 @@ def get_raw_batch(
     num_samples,  # =3, VAL: 1
     width,  # =24, VAL: 24
     res,  # =0.5, VAL: 0.75
+    channel,
 ):
     """Sample a raw batch with provided atom coordinates.
 
@@ -435,6 +183,7 @@ def get_raw_batch(
         num_samples: number of rotations to sample
         width: grid width
         res: grid resolution
+        channel: the channel to consider
     """
 
     num_samples = 1 if num_samples is None else num_samples  # default was 3
@@ -458,23 +207,32 @@ def get_raw_batch(
     # TODO: For debugging
     # num_samples = 1
 
-    B = num_samples # 1
-    T = rec_channels + parent_channels # 9
-    N = width # 24
+    B = num_samples  # 1
+    T = rec_channels + parent_channels  # 9
+    N = width  # 24
 
     shape = (B, T, N, N, N)
     grid = make_tensor(shape)
 
     # for i in range(num_samples):
-    rot = rand_rot()
+    # rot = rand_rot()
 
-    grid = mol_gridify2(
-        grid, p_coords, p_types, 0, parent_channels, width, res, conn, rot,
-    )
+    if channel < parent_channels:
+        coords = p_coords
+        types = p_types
+        offset = 0
+    else:
+        coords = r_coords
+        types = r_types
+        offset = parent_channels
 
-    # TODO: Harrison should check. parent_channels was p_dim.
-    grid = mol_gridify2(
-        grid, r_coords, r_types, parent_channels, rec_channels, width, res, conn, rot,
+    # Filter atoms based on the grid bounding box.
+    filt_coords, filt_layers = filter_atoms_no_rot(coords, types, width, res, conn)
+
+    # for i in range(parent_channels):
+    # print(i)
+    grid = mol_gridify2_one_channel(
+        grid, offset, channel, width, res, conn, filt_coords, filt_layers
     )
 
     return flatten_tensor(grid, shape)
