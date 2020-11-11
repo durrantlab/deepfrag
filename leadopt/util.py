@@ -108,6 +108,18 @@ def load_ligand(sdf):
     return lig, frags
 
 
+def load_ligands_pdb(pdb):
+    """Load multiple ligands from a pdb file.
+    
+    Args:
+        pdb: Path to pdb file containing a ligand.
+    """
+    lig_mult = Chem.MolFromPDBFile(pdb)
+    ligands = Chem.GetMolFrags(lig_mult, asMols=True, sanitizeFrags=True)
+    
+    return ligands
+
+
 def remove_water(m):
     """Removes water molecules from an rdkit mol."""
     parts = Chem.GetMolFrags(m, asMols=True, sanitizeFrags=False)

@@ -16,7 +16,14 @@ from leadopt.grid_util import get_batch
 from leadopt.metrics import mse, bce, tanimoto, cos, top_k_acc,\
     average_support, inside_support
 
-from config import partitions
+from config import partitions, moad_partitions
+
+
+def get_bios(p):
+    part = []
+    for n in range(20):
+        part += [x.lower() + '_bio%d' % n for x in p]
+    return part
 
 
 def _do_mean(fn):
@@ -293,8 +300,10 @@ class VoxelNet(LeadoptModel):
             self._args['fragments'],
             rec_typer=REC_TYPER[self._args['rec_typer']],
             lig_typer=LIG_TYPER[self._args['lig_typer']],
-            filter_rec=(
-                partitions.TRAIN if not self._args['no_partitions'] else None),
+            # filter_rec=(
+            #     partitions.TRAIN if not self._args['no_partitions'] else None),
+            filter_rec=set(get_bios(moad_partitions.TRAIN)),
+            filter_smi=set(moad_partitions.TRAIN_SMI),
             fdist_min=self._args['fdist_min'], 
             fdist_max=self._args['fdist_max'], 
             fmass_min=self._args['fmass_min'], 
@@ -306,8 +315,10 @@ class VoxelNet(LeadoptModel):
             self._args['fragments'],
             rec_typer=REC_TYPER[self._args['rec_typer']],
             lig_typer=LIG_TYPER[self._args['lig_typer']],
-            filter_rec=(
-                partitions.VAL if not self._args['no_partitions'] else None),
+            # filter_rec=(
+            #     partitions.VAL if not self._args['no_partitions'] else None),
+            filter_rec=set(get_bios(moad_partitions.VAL)),
+            filter_smi=set(moad_partitions.VAL_SMI),
             fdist_min=self._args['fdist_min'], 
             fdist_max=self._args['fdist_max'], 
             fmass_min=self._args['fmass_min'], 
@@ -446,7 +457,9 @@ class VoxelNet(LeadoptModel):
             self._args['fragments'],
             rec_typer=REC_TYPER[self._args['rec_typer']],
             lig_typer=LIG_TYPER[self._args['lig_typer']],
-            filter_rec=partitions.TEST,
+            # filter_rec=partitions.TEST,
+            filter_rec=set(get_bios(moad_partitions.TEST)),
+            filter_smi=set(moad_partitions.TEST_SMI),
             fdist_min=self._args['fdist_min'], 
             fdist_max=self._args['fdist_max'], 
             fmass_min=self._args['fmass_min'], 

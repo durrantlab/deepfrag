@@ -140,9 +140,10 @@ LIG_TYPER = {
 class FragmentDataset(Dataset):
     """Utility class to work with the packed fragments.h5 format."""
     
-    def __init__(self, fragment_file, rec_typer, lig_typer, filter_rec=None,
-                 fdist_min=None, fdist_max=None, fmass_min=None,
-                 fmass_max=None, verbose=False, lazy_loading=True):
+    def __init__(self, fragment_file, rec_typer=REC_TYPER['simple'],
+        lig_typer=LIG_TYPER['simple'], filter_rec=None, filter_smi=None,
+        fdist_min=None, fdist_max=None, fmass_min=None, fmass_max=None, 
+        verbose=False, lazy_loading=True):
         """Initializes the fragment dataset.
         
         Args:
@@ -168,7 +169,7 @@ class FragmentDataset(Dataset):
         self.frag = self._load_fragments(fragment_file, lig_typer)
 
         self.valid_idx = self._get_valid_examples(
-            filter_rec, fdist_min, fdist_max, fmass_min, fmass_max)
+            filter_rec, filter_smi, fdist_min, fdist_max, fmass_min, fmass_max, verbose)
 
     def _load_rec(self, fragment_file, rec_typer):
         """Loads receptor information."""
@@ -216,7 +217,13 @@ class FragmentDataset(Dataset):
         frag_smiles = f['frag_smiles'][()]
         frag_mass = f['frag_mass'][()]
         frag_dist = f['frag_dist'][()]
-        
+
+        frag_lig_smi = None
+        frag_lig_idx = None
+        if 'frag_lig_smi' in f.keys():
+            frag_lig_smi = f['frag_lig_smi'][()]
+            frag_lig_idx = f['frag_lig_idx'][()]
+
         # unpack frag data into separate structures
         frag_coords = frag_data[:,:3].astype(np.float32)
         frag_types = frag_data[:,3].astype(np.int32)
@@ -256,6 +263,8 @@ class FragmentDataset(Dataset):
             'frag_smiles': frag_smiles,     # f_idx -> smiles
             'frag_mass': frag_mass,         # f_idx -> mass
             'frag_dist': frag_dist,         # f_idx -> dist
+            'frag_lig_smi': frag_lig_smi,
+            'frag_lig_idx': frag_lig_idx,
             'frag_loaded': frag_loaded
         }
         
@@ -263,8 +272,8 @@ class FragmentDataset(Dataset):
 
         return frag
 
-    def _get_valid_examples(self, filter_rec, fdist_min, fdist_max, fmass_min,
-                            fmass_max):
+    def _get_valid_examples(self, filter_rec, filter_smi, fdist_min, fdist_max, fmass_min,
+                            fmass_max, verbose):
         """Returns an array of valid fragment indexes.
         
         "Valid" in this context means the fragment belongs to a receptor in
@@ -274,11 +283,38 @@ class FragmentDataset(Dataset):
         # keep track of valid examples
         valid_mask = np.ones(self.frag['frag_lookup'].shape[0]).astype(np.bool)
         
+        num_frags = self.frag['frag_lookup'].shape[0]
+
         # filter by receptor id
         if filter_rec is not None:
-            valid_rec = np.vectorize(lambda k: k[0].decode('ascii') in filter_rec)(self.frag['frag_lookup'])
+            valid_rec = np.zeros(num_frags, dtype=np.bool)
+
+            r = range(num_frags)
+            if verbose:
+                r = tqdm.tqdm(r, desc='filter rec')
+
+            for i in r:
+                rec = self.frag['frag_lookup'][i][0].decode('ascii')
+                if rec in filter_rec:
+                    valid_rec[i] = 1
             valid_mask *= valid_rec
             
+        # filter by ligand smiles string
+        if filter_smi is not None:
+            valid_lig = np.zeros(num_frags, dtype=np.bool)
+
+            r = range(num_frags)
+            if verbose:
+                r = tqdm.tqdm(r, desc='filter lig')
+
+            for i in r:
+                smi = self.frag['frag_lig_smi'][self.frag['frag_lig_idx'][i]]
+                smi = smi.decode('ascii')
+                if smi in filter_smi:
+                    valid_lig[i] = 1
+
+            valid_mask *= valid_lig
+
         # filter by fragment distance
         if fdist_min is not None:
             valid_mask[self.frag['frag_dist'] < fdist_min] = 0
