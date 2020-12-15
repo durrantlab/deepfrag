@@ -3,10 +3,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+Flatten = None
+try:
+    Flatten = nn.Flatten
+except:
+    from . import backport
+    Flatten = backport.Flatten
 
 class VoxelFingerprintNet(nn.Module):
     def __init__(self, in_channels, output_size, blocks=[32,64], fc=[2048], pad=True):
         super(VoxelFingerprintNet, self).__init__()
+
+        blocks = list(blocks)
+        fc = list(fc)
 
         self.blocks = nn.ModuleList()
         prev = in_channels
@@ -32,7 +41,7 @@ class VoxelFingerprintNet(nn.Module):
 
         self.reduce = nn.Sequential(
             nn.AdaptiveAvgPool3d((1,1,1)),
-            nn.Flatten(),
+            Flatten(),
         )
 
         pred = []

@@ -265,6 +265,9 @@ def get_batch(data, batch_size=16, batch_set=None, width=48, res=0.5,
     """
     assert (not (ignore_receptor and ignore_parent)), "Can't ignore parent and receptor!"
 
+    batch_size = int(batch_size)
+    width = int(width)
+
     rec_channels = data.rec_layers()
     lig_channels = data.lig_layers()
 

@@ -29,6 +29,13 @@ def rdkfingerprint(m):
     return n_fp
 
 
+def rdkfingerprint10(m):
+    '''rdkfingerprint as 2048-len bit array (maxPath=10)'''
+    fp = Chem.rdmolops.RDKFingerprint(m, maxPath=10)
+    n_fp = list(map(int, list(fp.ToBitString())))
+    return n_fp
+
+
 def morganfingerprint(m):
     '''morgan fingerprint as 2048-len bit array'''
     m.UpdatePropertyCache(strict=False)
@@ -49,6 +56,7 @@ def gobbi2d(m):
 
 FINGERPRINTS = {
     'rdk': (rdkfingerprint, 2048),
+    'rdk10': (rdkfingerprint10, 2048),
     'morgan': (morganfingerprint, 2048),
     'gobbi2d': (gobbi2d, 2048),
 }

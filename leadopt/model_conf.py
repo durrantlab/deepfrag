@@ -10,7 +10,7 @@ import tqdm
 import numpy as np
 
 from leadopt.models.voxel import VoxelFingerprintNet
-from leadopt.data_util import FragmentDataset, FingerprintDataset, LIG_TYPER,\
+from leadopt.data_util import FragmentDataset, SharedFragmentDataset, FingerprintDataset, LIG_TYPER,\
     REC_TYPER
 from leadopt.grid_util import get_batch
 from leadopt.metrics import mse, bce, tanimoto, cos, top_k_acc,\
@@ -293,38 +293,73 @@ class VoxelNet(LeadoptModel):
         ).to(self._device)
         return {'voxel': voxel}
 
-    def train(self, save_path=None):
-
+    def load_data(self):
         print('[*] Loading data...', flush=True)
-        train_dat = FragmentDataset(
+        # train_dat = FragmentDataset(
+        #     self._args['fragments'],
+        #     rec_typer=REC_TYPER[self._args['rec_typer']],
+        #     lig_typer=LIG_TYPER[self._args['lig_typer']],
+        #     # filter_rec=(
+        #     #     partitions.TRAIN if not self._args['no_partitions'] else None),
+        #     filter_rec=set(get_bios(moad_partitions.TRAIN)),
+        #     filter_smi=set(moad_partitions.TRAIN_SMI),
+        #     fdist_min=self._args['fdist_min'], 
+        #     fdist_max=self._args['fdist_max'], 
+        #     fmass_min=self._args['fmass_min'], 
+        #     fmass_max=self._args['fmass_max'],
+        #     verbose=True
+        # )
+
+        # val_dat = FragmentDataset(
+        #     self._args['fragments'],
+        #     rec_typer=REC_TYPER[self._args['rec_typer']],
+        #     lig_typer=LIG_TYPER[self._args['lig_typer']],
+        #     # filter_rec=(
+        #     #     partitions.VAL if not self._args['no_partitions'] else None),
+        #     filter_rec=set(get_bios(moad_partitions.VAL)),
+        #     filter_smi=set(moad_partitions.VAL_SMI),
+        #     fdist_min=self._args['fdist_min'], 
+        #     fdist_max=self._args['fdist_max'], 
+        #     fmass_min=self._args['fmass_min'], 
+        #     fmass_max=self._args['fmass_max'],
+        #     verbose=True
+        # )
+
+        dat = FragmentDataset(
             self._args['fragments'],
             rec_typer=REC_TYPER[self._args['rec_typer']],
             lig_typer=LIG_TYPER[self._args['lig_typer']],
-            # filter_rec=(
-            #     partitions.TRAIN if not self._args['no_partitions'] else None),
+            verbose=True
+        )
+
+        train_dat = SharedFragmentDataset(
+            dat,
             filter_rec=set(get_bios(moad_partitions.TRAIN)),
             filter_smi=set(moad_partitions.TRAIN_SMI),
             fdist_min=self._args['fdist_min'], 
             fdist_max=self._args['fdist_max'], 
             fmass_min=self._args['fmass_min'], 
             fmass_max=self._args['fmass_max'],
-            verbose=True
         )
 
-        val_dat = FragmentDataset(
-            self._args['fragments'],
-            rec_typer=REC_TYPER[self._args['rec_typer']],
-            lig_typer=LIG_TYPER[self._args['lig_typer']],
-            # filter_rec=(
-            #     partitions.VAL if not self._args['no_partitions'] else None),
+        val_dat = SharedFragmentDataset(
+            dat,
             filter_rec=set(get_bios(moad_partitions.VAL)),
             filter_smi=set(moad_partitions.VAL_SMI),
             fdist_min=self._args['fdist_min'], 
             fdist_max=self._args['fdist_max'], 
             fmass_min=self._args['fmass_min'], 
             fmass_max=self._args['fmass_max'],
-            verbose=True
         )
+
+        return train_dat, val_dat
+
+    def train(self, save_path=None, custom_steps=None, checkpoint_callback=None, data=None):
+
+        if data is None:
+            data = self.load_data()
+
+        train_dat, val_dat = data
 
         fingerprints = FingerprintDataset(self._args['fingerprints'])
 
@@ -345,10 +380,17 @@ class VoxelNet(LeadoptModel):
         print('[*] Val smiles: %d' % val_fingerprints.shape[0])
         print('[*] All smiles: %d' % all_fingerprints.shape[0])
 
+        # memory optimization, drop some unnecessary columns
+        train_dat._dat.frag['frag_mass'] = None
+        train_dat._dat.frag['frag_dist'] = None
+        train_dat._dat.frag['frag_lig_smi'] = None
+        train_dat._dat.frag['frag_lig_idx'] = None
+
         print('[*] Training...', flush=True)
         opt = torch.optim.Adam(
             self._models['voxel'].parameters(), lr=self._args['learning_rate'])
         steps_per_epoch = len(train_dat) // self._args['batch_size']
+        steps_per_epoch = custom_steps if custom_steps is not None else steps_per_epoch
         
         # configure metrics
         dist_fn = DIST_FN[self._args['dist_fn']]
@@ -360,11 +402,11 @@ class VoxelNet(LeadoptModel):
         loss_fn = LOSS_TYPE[self._args['loss']](loss_fingerprints, dist_fn)
 
         train_metrics = MetricTracker('train', {
-            'all': top_k_acc(all_fingerprints, dist_fn, [1,5,10,50,100], pre='all')
+            'all': top_k_acc(all_fingerprints, dist_fn, [1,8,64], pre='all')
         })
         val_metrics = MetricTracker('val', {
-            'all': top_k_acc(all_fingerprints, dist_fn, [1,5,10,50,100], pre='all'),
-            'val': top_k_acc(val_fingerprints, dist_fn, [1,5,10,50,100], pre='val'),
+            'all': top_k_acc(all_fingerprints, dist_fn, [1,8,64], pre='all'),
+            # 'val': top_k_acc(val_fingerprints, dist_fn, [1,5,10,50,100], pre='val'),
         })
 
         best_loss = None
@@ -438,6 +480,9 @@ class VoxelNet(LeadoptModel):
                     val_metrics.update('loss', loss)
                     val_metrics.evaluate(predicted_fp, correct_fp)
 
+                if checkpoint_callback:
+                    checkpoint_callback(self, epoch)
+
                 val_metrics.normalize(self._args['test_steps'])
                 self._log.log(val_metrics.get_all())
 
@@ -451,15 +496,15 @@ class VoxelNet(LeadoptModel):
 
                 val_metrics.clear()
 
-    def run_test(self, save_path):
+    def run_test(self, save_path, use_val=False):
         # load test dataset
         test_dat = FragmentDataset(
             self._args['fragments'],
             rec_typer=REC_TYPER[self._args['rec_typer']],
             lig_typer=LIG_TYPER[self._args['lig_typer']],
             # filter_rec=partitions.TEST,
-            filter_rec=set(get_bios(moad_partitions.TEST)),
-            filter_smi=set(moad_partitions.TEST_SMI),
+            filter_rec=set(get_bios(moad_partitions.VAL if use_val else moad_partitions.TEST)),
+            filter_smi=set(moad_partitions.VAL_SMI if use_val else moad_partitions.TEST_SMI),
             fdist_min=self._args['fdist_min'], 
             fdist_max=self._args['fdist_max'], 
             fmass_min=self._args['fmass_min'], 
@@ -509,8 +554,12 @@ class VoxelNet(LeadoptModel):
                 example_idx, sample_idx = batch[j]
                 predicted_fp[example_idx][sample_idx] = predicted[j].detach().cpu().numpy()
 
-        np.save(os.path.join(save_path, 'predicted_fp.npy'), predicted_fp)
-        np.save(os.path.join(save_path, 'correct_fp.npy'), correct_fp)
+        if use_val:
+            np.save(os.path.join(save_path, 'val_predicted_fp.npy'), predicted_fp)
+            np.save(os.path.join(save_path, 'val_correct_fp.npy'), correct_fp)
+        else:
+            np.save(os.path.join(save_path, 'predicted_fp.npy'), predicted_fp)
+            np.save(os.path.join(save_path, 'correct_fp.npy'), correct_fp)
 
         print('done.')
 

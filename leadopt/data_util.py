@@ -43,7 +43,7 @@ class AtomTyper(object):
 
 class CondAtomTyper(AtomTyper):
     def __init__(self, cond_func):
-        assert len(cond_func) <= 32
+        assert len(cond_func) <= 16
         def _fn(*args):
             v = 0
             for k in range(len(cond_func)):
@@ -183,12 +183,12 @@ class FragmentDataset(Dataset):
         if self.verbose:
             r = tqdm.tqdm(r, desc='Remap receptor atoms')
 
-        rec_remapped = np.zeros(len(rec_types), dtype=np.uint32)
+        rec_remapped = np.zeros(len(rec_types), dtype=np.uint16)
         if not self._lazy_loading:
             for i in r:
                 rec_remapped[i] = rec_typer.apply(*rec_types[i])
 
-        rec_loaded = np.zeros(len(rec_lookup)).astype(np.int32)
+        rec_loaded = np.zeros(len(rec_lookup)).astype(np.bool)
 
         # create rec mapping
         rec_mapping = {}
@@ -226,14 +226,14 @@ class FragmentDataset(Dataset):
 
         # unpack frag data into separate structures
         frag_coords = frag_data[:,:3].astype(np.float32)
-        frag_types = frag_data[:,3].astype(np.int32)
+        frag_types = frag_data[:,3].astype(np.uint8)
         
-        frag_remapped = np.zeros(len(frag_types), dtype=np.uint32)
+        frag_remapped = np.zeros(len(frag_types), dtype=np.uint16)
         if not self._lazy_loading:
             for i in range(len(frag_types)):
                 frag_remapped[i] = lig_typer.apply(frag_types[i])
         
-        frag_loaded = np.zeros(len(frag_lookup)).astype(np.int32)
+        frag_loaded = np.zeros(len(frag_lookup)).astype(np.bool)
 
         # find and save connection point
         r = range(len(frag_lookup))
@@ -353,7 +353,9 @@ class FragmentDataset(Dataset):
         """
         # convert to fragment index
         frag_idx = self.valid_idx[idx]
+        return self.get_raw(frag_idx)
         
+    def get_raw(self, frag_idx):
         # lookup fragment
         rec_id, f_start, f_end, p_start, p_end = self.frag['frag_lookup'][frag_idx]
         smiles = self.frag['frag_smiles'][frag_idx].decode('ascii')
@@ -418,6 +420,39 @@ class FragmentDataset(Dataset):
 
     def rec_layers(self):
         return self._rec_typer.size()
+
+
+class SharedFragmentDataset(object):
+    def __init__(self, dat, filter_rec=None, filter_smi=None, fdist_min=None,
+        fdist_max=None, fmass_min=None, fmass_max=None):
+
+        self._dat = dat
+
+        self.valid_idx = self._dat._get_valid_examples(
+            filter_rec, filter_smi, fdist_min, fdist_max, fmass_min, fmass_max, verbose=True)
+
+    def __len__(self):
+        return self.valid_idx.shape[0]
+
+    def __getitem__(self, idx):
+        frag_idx = self.valid_idx[idx]
+        return self._dat.get_raw(frag_idx)
+
+    def get_valid_smiles(self):
+        """Returns a list of all valid smiles fragments."""
+        valid_smiles = set()
+
+        for idx in self.valid_idx:
+            smiles = self._dat.frag['frag_smiles'][idx].decode('ascii')
+            valid_smiles.add(smiles)
+
+        return list(valid_smiles)
+
+    def lig_layers(self):
+        return self._dat.lig_layers()
+
+    def rec_layers(self):
+        return self._dat.rec_layers()
 
 
 class FingerprintDataset(Dataset):

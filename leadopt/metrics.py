@@ -149,7 +149,7 @@ def top_k_acc(fingerprints, fn, k, pre=''):
             for j in range(len(k)):
                 c[i,j] = int(count < k[j])
             
-        score = torch.mean(c, axis=0)
+        score = torch.mean(c, 0)
         m = {'%sacc_%d' % (pre, h): v.item() for h,v in zip(k,score)}
 
         return m
