@@ -563,6 +563,11 @@ class VoxelNet(LeadoptModel):
 
         print('done.')
 
+    def predict(self, batch):
+        with torch.no_grad():
+            pred = self._models['voxel'](batch)
+            return pred
+
 
 MODELS = {
     'voxelnet': VoxelNet

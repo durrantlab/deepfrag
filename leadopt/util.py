@@ -1,12 +1,15 @@
 '''
 rdkit/openbabel utility scripts
 '''
-from rdkit import Chem
 import numpy as np
+
+
 try:
     import pybel
 except:
     from openbabel import pybel
+
+from rdkit import Chem
 
 
 def get_coords(mol):
@@ -279,55 +282,3 @@ def merge_smiles(sma, smb):
     
     return sm
 
-
-REPLACE = [
-    ('N=[C+](=N)=N', 'N=C(N)N'),
-    ('[C-](=O)=O', 'C(=O)O'),
-#     ('[NH2]', 'N'),
-    ('[C+](=N)=N', 'C(=N)N'),
-#     ('[c+](=N)', 'c(=N)'),
-    ('S(=O)(=O)=O', 'S(=O)(=O)O'),
-    ('C#O', 'C=O'),
-]
-
-def fix_smiles(sm):
-    m = Chem.MolFromSmiles(sm, sanitize=False)
-    
-    for a,b in REPLACE:
-        m = Chem.ReplaceSubstructs(
-            m,
-            Chem.MolFromSmiles(a, sanitize=False),
-            Chem.MolFromSmiles(b, sanitize=False),
-            replaceAll=True
-        )[0]
-        
-    m.UpdatePropertyCache(strict=False)
-    
-    for atom in m.GetAtoms():
-        # handle tetravalent nitrogen
-        if atom.GetAtomicNum() == 7 and atom.GetExplicitValence() == 4:
-            atom.SetFormalCharge(1)
-            
-        if atom.GetAtomicNum() == 6 and atom.GetFormalCharge() == 1:
-            atom.SetFormalCharge(0)
-            
-        if atom.GetAtomicNum() == 6 and atom.GetFormalCharge() == -1:
-            atom.SetFormalCharge(0)
-            
-        if atom.GetAtomicNum() == 7 and atom.GetExplicitValence() == 5:
-            atom.SetNumExplicitHs(0)
-            
-        if atom.GetAtomicNum() == 7 and atom.GetExplicitValence() == 6:
-            atom.SetNumExplicitHs(0)
-            atom.SetFormalCharge(1)
-            
-        if atom.GetAtomicNum() == 7 and atom.GetExplicitValence() == 3 and atom.GetNumExplicitHs() == 0 and atom.GetIsAromatic() == True:
-            atom.SetFormalCharge(1)
-            
-    h = m
-    try:
-        Chem.SanitizeMol(m)
-    except:
-        return None
-    
-    return Chem.MolToSmiles(m)

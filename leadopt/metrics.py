@@ -131,7 +131,7 @@ def top_k_acc(fingerprints, fn, k, pre=''):
         fingerprints: NxF tensor of fingerprints
         fn: distance function to compare fingerprints
         k: List[int] containing K-positions to evaluate (e.g. [1,5,10])
-        pre: optional postfix on the metric name
+        pre: optional prefix on the metric name
     """
 
     def _top_k_acc(yp, yt):
