@@ -3,6 +3,10 @@
 
 This repository contains code for machine learning based lead optimization.
 
+# Examples
+
+See [this Colab](https://colab.research.google.com/drive/1XWin26iDXqZ2ioGtwDRuO4iRomGVpdte) for an interactive example of how to use a pre-trained DeepFrag model to generate predictions.
+
 # Overview
 
 - `config`: fixed configuration information (eg. TRAIN/VAL/TEST partitions)
