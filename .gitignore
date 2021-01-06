@@ -1,13 +1,8 @@
 **/*.pyc
 **/__pycache__
 .ipynb_checkpoints
-old
 
 data/**
 !data/README.md
 
-pretrained/**
-!pretrained/README.md
-
 .DS_Store
-grid_0.right_answer.json

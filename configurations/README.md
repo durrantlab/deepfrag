@@ -1,6 +1,11 @@
 This folder contains benchmark model configurations referenced in the paper.
 
-You can retrain from these configurations using the `train.py` script:
+Overview:
+- `layer_type_sweep/*`: experimenting with different parent/receptor typing schemes
+- `voxelation_sweep/*`: experimenting with different voxelation types and atomic influence radii
+- `final.json`: final production model
+
+You can train new models using these configurations with the `train.py` script:
 
 ```sh
 python train.py \

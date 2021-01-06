@@ -41,7 +41,7 @@ def main():
         print('You can specify a model or configuration file but not both.')
         exit(-1)
 
-    # initialize model
+    # Initialize model.
     model_type = args_dict['version']
     model = MODELS[model_type](args_dict)
 

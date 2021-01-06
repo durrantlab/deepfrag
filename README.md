@@ -1,24 +1,22 @@
 
-# Lead Optimization
+# DeepFrag
 
 This repository contains code for machine learning based lead optimization.
 
 # Overview
 
 - `config`: fixed configuration information (eg. TRAIN/VAL/TEST partitions)
-- `configurations`: benchmark model configurations
+- `configurations`: benchmark model configurations (see [`configurations/README.md`](configurations/README.md))
 - `data`: training/inference data (see [`data/README.md`](data/README.md))
 - `leadopt`: main module code
     - `models`: pytorch architecture definitions
     - `data_util.py`: utility code for reading packed fragment/fingerprint data files
     - `grid_util.py`: GPU-accelerated grid generation code
-    - (outdated) `infer.py`: code for inference with a trained model
     - `metrics.py`: pytorch implementations of several metrics
     - `model_conf.py`: contains code to configure and train models
     - `util.py`: utility code for rdkit/openbabel processing
-- (outdated) `scripts`: data processing scripts (see [`scripts/README.md`](scripts/README.md))
+- `scripts`: data processing scripts (see [`scripts/README.md`](scripts/README.md))
 - `train.py`: CLI interface to launch training runs
-- (outdated) `leadopt.py`: CLI interface to run inference on new samples
 
 # Dependencies
 

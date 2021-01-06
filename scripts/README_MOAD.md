@@ -1,4 +1,14 @@
 
+# MOAD Data
+
+This readme describes how to process raw MOAD data for use in training the DeepFrag model. Note that we already provide fully processed datasets for
+training so this section mostly serves as a description of how to process future versions of the MOAD dataset or as an example for researchers looking
+to accomplish similar things.
+
+See [`data/README.md`](../data/README.md) for instructions on how to download the packed `moad.h5` data.
+
+See [`config/moad_partitions.py`](../config/moad_partitions.py) for a pre-computed MOAD TRAIN/VAL/TEST split (generated with seed 7).
+
 # 1. Download MOAD datasets
 
 Go to https://bindingmoad.org/Home/download and download `every_part_a.zip` and `every_part_b.zip` and "Binding data" (`every.csv`).
@@ -47,4 +57,21 @@ $ python3 scripts/process_moad.py \
     -o $MOAD_DIR/packed/moad.h5 \
     -n <number of cores> \
     -s <examples per file (e.g. 500)>
+```
+
+# 5. Merge packed data files.
+
+```sh
+$ python3 scripts/merge_moad.py \
+    -i $MOAD_DIR/packed \
+    -o moad.h5
+```
+
+# 6. Generate MOAD Training splits
+
+```sh
+$ python3 scripts/moad_training_splits.py \
+    -c $MOAD_DIR/every.csv \
+    -s 7 \
+    -o moad_partitions.py
 ```

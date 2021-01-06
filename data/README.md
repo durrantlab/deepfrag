@@ -1,5 +1,7 @@
 This folder contains data used during training and inference.
 
+Model configuration files in `/configurations` expect the data files to be in this directory. You can either copy them directly here or use symlinks.
+
 You can download the data here: https://pitt.box.com/s/ubohnl10idnarpam40hq6chggtaojqv7
 
 Overview:
