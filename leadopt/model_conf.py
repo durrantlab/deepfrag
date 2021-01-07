@@ -1,3 +1,17 @@
+# Copyright 2021 Jacob Durrant
+
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy
+# of the License at
+
+#   http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
 
 import os
 import json
@@ -59,7 +73,7 @@ LOSS_TYPE = {
 class RunLog(object):
     def __init__(self, args, models, wandb_project=None):
         """Initialize a run logger.
-        
+
         Args:
             args: command line training arguments
             models: {name: model} mapping
@@ -71,7 +85,7 @@ class RunLog(object):
                 project=wandb_project,
                 config=args
             )
-    
+
             for m in models:
                 wandb.watch(models[m])
 
@@ -131,7 +145,7 @@ class LeadoptModel(object):
     @staticmethod
     def setup_parser(sub):
         """Adds arguments to a subparser.
-        
+
         Args:
             sub: an argparse subparser
         """
@@ -147,7 +161,7 @@ class LeadoptModel(object):
 
         Call LeadoptModel.load to infer model type.
         Or call subclass.load to load a specific model type.
-        
+
         Args:
             path: full path to saved model
         """
@@ -181,7 +195,7 @@ class LeadoptModel(object):
 
     def save(self, path):
         """Save model configuration to a path.
-        
+
         Args:
             path: path to an existing directory to save models
         """
@@ -303,9 +317,9 @@ class VoxelNet(LeadoptModel):
         #     #     partitions.TRAIN if not self._args['no_partitions'] else None),
         #     filter_rec=set(get_bios(moad_partitions.TRAIN)),
         #     filter_smi=set(moad_partitions.TRAIN_SMI),
-        #     fdist_min=self._args['fdist_min'], 
-        #     fdist_max=self._args['fdist_max'], 
-        #     fmass_min=self._args['fmass_min'], 
+        #     fdist_min=self._args['fdist_min'],
+        #     fdist_max=self._args['fdist_max'],
+        #     fmass_min=self._args['fmass_min'],
         #     fmass_max=self._args['fmass_max'],
         #     verbose=True
         # )
@@ -318,9 +332,9 @@ class VoxelNet(LeadoptModel):
         #     #     partitions.VAL if not self._args['no_partitions'] else None),
         #     filter_rec=set(get_bios(moad_partitions.VAL)),
         #     filter_smi=set(moad_partitions.VAL_SMI),
-        #     fdist_min=self._args['fdist_min'], 
-        #     fdist_max=self._args['fdist_max'], 
-        #     fmass_min=self._args['fmass_min'], 
+        #     fdist_min=self._args['fdist_min'],
+        #     fdist_max=self._args['fdist_max'],
+        #     fmass_min=self._args['fmass_min'],
         #     fmass_max=self._args['fmass_max'],
         #     verbose=True
         # )
@@ -336,9 +350,9 @@ class VoxelNet(LeadoptModel):
             dat,
             filter_rec=set(get_bios(moad_partitions.TRAIN)),
             filter_smi=set(moad_partitions.TRAIN_SMI),
-            fdist_min=self._args['fdist_min'], 
-            fdist_max=self._args['fdist_max'], 
-            fmass_min=self._args['fmass_min'], 
+            fdist_min=self._args['fdist_min'],
+            fdist_max=self._args['fdist_max'],
+            fmass_min=self._args['fmass_min'],
             fmass_max=self._args['fmass_max'],
         )
 
@@ -346,9 +360,9 @@ class VoxelNet(LeadoptModel):
             dat,
             filter_rec=set(get_bios(moad_partitions.VAL)),
             filter_smi=set(moad_partitions.VAL_SMI),
-            fdist_min=self._args['fdist_min'], 
-            fdist_max=self._args['fdist_max'], 
-            fmass_min=self._args['fmass_min'], 
+            fdist_min=self._args['fdist_min'],
+            fdist_max=self._args['fdist_max'],
+            fmass_min=self._args['fmass_min'],
             fmass_max=self._args['fmass_max'],
         )
 
@@ -391,7 +405,7 @@ class VoxelNet(LeadoptModel):
             self._models['voxel'].parameters(), lr=self._args['learning_rate'])
         steps_per_epoch = len(train_dat) // self._args['batch_size']
         steps_per_epoch = custom_steps if custom_steps is not None else steps_per_epoch
-        
+
         # configure metrics
         dist_fn = DIST_FN[self._args['dist_fn']]
 
@@ -505,9 +519,9 @@ class VoxelNet(LeadoptModel):
             # filter_rec=partitions.TEST,
             filter_rec=set(get_bios(moad_partitions.VAL if use_val else moad_partitions.TEST)),
             filter_smi=set(moad_partitions.VAL_SMI if use_val else moad_partitions.TEST_SMI),
-            fdist_min=self._args['fdist_min'], 
-            fdist_max=self._args['fdist_max'], 
-            fmass_min=self._args['fmass_min'], 
+            fdist_min=self._args['fdist_min'],
+            fdist_max=self._args['fdist_max'],
+            fmass_min=self._args['fmass_min'],
             fmass_max=self._args['fmass_max'],
             verbose=True
         )
@@ -523,7 +537,7 @@ class VoxelNet(LeadoptModel):
 
         smiles = [test_dat[i]['smiles'] for i in range(len(test_dat))]
         correct_fp = fingerprints.for_smiles(smiles).numpy()
-    
+
         # (example_idx, sample_idx)
         queries = []
         for i in range(len(test_dat)):

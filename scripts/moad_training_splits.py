@@ -1,3 +1,17 @@
+# Copyright 2021 Jacob Durrant
+
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy
+# of the License at
+
+#   http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
 
 import argparse
 import os
@@ -24,23 +38,23 @@ def do_split(families, pa=0.6):
             fa.append(f)
         else:
             fb.append(f)
-    
+
     return (fa, fb)
 
 def split_smi(smi):
     l = list(smi)
     sz = len(l)
-    
+
     np.random.shuffle(l)
-    
+
     return (set(l[:sz//2]), set(l[sz//2:]))
 
 def split_smi3(smi):
     l = list(smi)
     sz = len(l)
-    
+
     np.random.shuffle(l)
-    
+
     v = sz//3
     return (set(l[:v]), set(l[v:v*2]), set(l[v*2:]))
 
@@ -117,7 +131,7 @@ def gen_split(csv, output, seed=7):
     out += 'TEST_SMI = ' + repr(test_s).replace(' ','') + '\n'
 
     open(output, 'w').write(out)
-        
+
 def main():
     parser = argparse.ArgumentParser()
 

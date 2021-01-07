@@ -1,3 +1,18 @@
+# Copyright 2021 Jacob Durrant
+
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy
+# of the License at
+
+#   http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
 '''
 Utility script to convert the MOAD dataset into a packed format
 '''
@@ -24,7 +39,7 @@ from leadopt import util
 
 
 # Data Format
-# 
+#
 # Receptor data:
 # - rec_lookup:     [id][start][end]
 # - rec_coords:     [x][y][z]
@@ -56,7 +71,7 @@ REPLACE = [
 
 def basic_replace(sm):
     m = Chem.MolFromSmiles(sm, False)
-    
+
     for a,b in REPLACE:
         m = Chem.ReplaceSubstructs(
             m,
@@ -64,7 +79,7 @@ def basic_replace(sm):
             Chem.MolFromSmiles(b, sanitize=False),
             replaceAll=True
         )[0]
-        
+
     return Chem.MolToSmiles(m)
 
 
@@ -74,7 +89,7 @@ def neutralize_smiles(sm):
     m = t.canonicalize(m)
     sm = Chem.MolToSmiles(m)
     sm = basic_replace(sm)
-    
+
     try:
         return molvs.standardize_smiles(sm)
     except:
@@ -98,7 +113,7 @@ def load_example(base, rec_id, target):
 
     lig_off = 0
     for lig in target.ligands:
-        
+
         lig_path = os.path.join(base, '%s_%s.pdb' % (rec_id, lig[0].replace(' ','_')))
         try:
             lig_mol = Chem.MolFromPDBFile(lig_path, True)
@@ -119,22 +134,22 @@ def load_example(base, rec_id, target):
         for parent, frag in splits:
             frag_data = util.mol_array(frag)
             parent_data = util.mol_array(parent)
-            
+
             frag_smi = Chem.MolToSmiles(
-                frag, 
-                isomericSmiles=False, 
-                kekuleSmiles=False, 
-                canonical=True, 
+                frag,
+                isomericSmiles=False,
+                kekuleSmiles=False,
+                canonical=True,
                 allHsExplicit=False
             )
 
             frag_smi = neutralize_smiles(frag_smi)
-            
+
             frag.UpdatePropertyCache(strict=False)
             mass = ExactMolWt(frag)
-            
+
             dist = util.frag_dist_to_receptor_raw(rec_coords, frag)
-            
+
             fragments.append((frag_data, parent_data, frag_smi, mass, dist, lig_off))
 
         lig_off += 1
@@ -184,14 +199,14 @@ def process(work, processed, moad_csv, out_path='moad.h5', num_cores=1):
 
     # Multiprocess.
     with multiprocessing.Pool(num_cores) as p:
-        with tqdm.tqdm(total=len(work)) as pbar: 
+        with tqdm.tqdm(total=len(work)) as pbar:
             for w, res in p.imap_unordered(multi_load, work):
                 pbar.update()
 
                 if res == None:
                     print('[!] Failed: %s' % w[1])
                     continue
-        
+
                 rcoords, rtypes, fragments, ex_lig_smiles = res
 
                 if len(fragments) == 0:
@@ -216,14 +231,14 @@ def process(work, processed, moad_csv, out_path='moad.h5', num_cores=1):
                     frag_start = frag_i
                     frag_end = frag_i + fdat.shape[0]
                     frag_i += fdat.shape[0]
-                    
+
                     parent_start = frag_i
                     parent_end = frag_i + pdat.shape[0]
                     frag_i += pdat.shape[0]
-                    
+
                     frag_data.append(fdat)
                     frag_data.append(pdat)
-                    
+
                     frag_lookup.append((rec_id.encode('ascii'), frag_start, frag_end, parent_start, parent_end))
                     frag_lig_idx.append(lig_idx+lig_off)
                     frag_smiles.append(frag_smi)
@@ -232,7 +247,7 @@ def process(work, processed, moad_csv, out_path='moad.h5', num_cores=1):
 
                 # Add ligand smiles.
                 frag_lig_smi += ex_lig_smiles
-            
+
     # Convert to numpy format.
     print('Convert numpy...', flush=True)
     n_rec_lookup = np.array(rec_lookup, dtype='<S16,<i4,<i4')
@@ -267,7 +282,7 @@ def process(work, processed, moad_csv, out_path='moad.h5', num_cores=1):
 def build_multiple(processed, moad_csv, out_path='moad.h5', num_cores=1, size=5000):
     # Load MOAD metadata.
     moad_families, moad_targets = parse_moad(moad_csv)
-    
+
     # Load files.
     files = [x for x in os.listdir(processed) if not x.startswith('.')]
     rec = [x for x in files if '_rec' in x]

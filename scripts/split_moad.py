@@ -1,3 +1,17 @@
+# Copyright 2021 Jacob Durrant
+
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy
+# of the License at
+
+#   http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
 
 import prody
 import tqdm
@@ -13,7 +27,7 @@ prody.utilities.logger.LOGGER.verbosity = 'none'
 
 def load_example(path, target):
     m = prody.parsePDB(path)
-    
+
     rec = m.select('not (nucleic or hetatm) and not water')
 
     # (lig_name, atoms)
@@ -30,7 +44,7 @@ def load_example(path, target):
             sel = m.select('chain %s and resnum = %s' % (lig_chain, lig_resnum))
 
         ligands.append((lig[0], sel))
-    
+
     return rec, ligands
 
 
@@ -39,17 +53,17 @@ def do_proc(packed):
 
     try:
         rec, ligands = load_example(path, target)
-        
+
         # Save receptor.
         prody.writePDB(os.path.join(out_dir, rec_name + '_rec.pdb'), rec)
-        
+
         # Save ligands.
         for lig_name, lig_sel in ligands:
             if lig_sel is None:
                 continue
             lig_name = lig_name.replace(' ', '_')
             prody.writePDB(os.path.join(out_dir, rec_name + '_' + lig_name + '.pdb'), lig_sel)
-        
+
     except Exception as e:
         print('failed', path)
         print(e)
@@ -76,13 +90,13 @@ def load_all(moad_dir, moad_csv, out_dir, num_cores=1):
         if fname.startswith('.'):
             continue
         files.append(os.path.join(moad_dir, fname))
-        
+
     files = sorted(files)
     print('[*] Loading %d files...' % len(files))
-    
+
     failed = []
     info = {}
-    
+
     # (path, target)
     work = []
 
@@ -99,7 +113,7 @@ def load_all(moad_dir, moad_csv, out_dir, num_cores=1):
 
     print('[*] Starting...')
     with multiprocessing.Pool(num_cores) as p:
-        with tqdm.tqdm(total=len(work)) as pbar: 
+        with tqdm.tqdm(total=len(work)) as pbar:
             for r in p.imap_unordered(do_proc, work):
                 pbar.update()
 

@@ -1,3 +1,17 @@
+# Copyright 2021 Jacob Durrant
+
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy
+# of the License at
+
+#   http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
 
 import torch
 import torch.nn as nn
@@ -36,7 +50,7 @@ def broadcast_fn(fn, yp, yt):
 def average_position(fingerprints, fn, norm=True):
     """Returns the average ranking of the correct fragment relative to all
        possible fragments.
-    
+
     Args:
         fingerprints: NxF tensor of fingerprint data
         fn: distance function to compare fingerprints
@@ -54,7 +68,7 @@ def average_position(fingerprints, fn, norm=True):
             # number of fragment that are closer or equal
             count = torch.sum((dist <= p_dist[i]).to(torch.float))
             c[i] = count
-            
+
         score = torch.mean(c)
         return score
 
@@ -148,7 +162,7 @@ def top_k_acc(fingerprints, fn, k, pre=''):
 
             for j in range(len(k)):
                 c[i,j] = int(count < k[j])
-            
+
         score = torch.mean(c, 0)
         m = {'%sacc_%d' % (pre, h): v.item() for h,v in zip(k,score)}
 

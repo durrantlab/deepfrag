@@ -1,3 +1,18 @@
+# Copyright 2021 Jacob Durrant
+
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy
+# of the License at
+
+#   http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
 """
 Contains code for gpu-accelerated grid generation.
 """
@@ -120,15 +135,15 @@ def gpu_gridify(grid, atom_num, atom_coords, atom_mask, layer_offset,
         # invisible atoms
         if mask == 0:
             continue
-        
+
         # point radius squared
         r = point_radius
         r2 = point_radius * point_radius
-        
+
         # quick cube bounds check
         if abs(fx-tx) > r2 or abs(fy-ty) > r2 or abs(fz-tz) > r2:
             continue
-        
+
         # value to add to this gridpoint
         val = 0
 
@@ -147,7 +162,7 @@ def gpu_gridify(grid, atom_num, atom_coords, atom_mask, layer_offset,
             d2 = (fx-tx)**2 + (fy-ty)**2 + (fz-tz)**2
             if d2 > r2:
                 continue
-            
+
             val = 1
         elif point_type == 2: # POINT_TYPE.CUBE
             # solid cube fill
@@ -290,7 +305,7 @@ def get_batch(data, batch_size=16, batch_set=None, width=48, res=0.5,
         rot = fixed_rot
         if rot is None:
             rot = rand_rot()
-        
+
         if ignore_receptor:
             mol_gridify(
                 cuda_grid,
@@ -420,5 +435,5 @@ def get_raw_batch(r_coords, r_types, p_coords, p_types, rec_typer, lig_typer,
             point_type=point_type,
             acc_type=acc_type
         )
-        
+
     return torch_grid
