@@ -19,10 +19,10 @@ rdkit/openbabel utility scripts
 import numpy as np
 
 
-try:
-    import pybel
-except:
-    from openbabel import pybel
+# try:
+#     import pybel
+# except:
+#     from openbabel import pybel
 
 from rdkit import Chem
 
@@ -164,32 +164,45 @@ def load_receptor(rec_path):
     return rec
 
 
+# def load_receptor_ob(rec_path):
+#     rec = next(pybel.readfile('pdb', rec_path))
+#     valid = [r for r in rec.residues if r.name != 'HOH']
+
+#     # map partial charge into byte range
+#     def conv_charge(x):
+#         x = max(x,-0.5)
+#         x = min(x,0.5)
+#         x += 0.5
+#         x *= 255
+#         x = int(x)
+#         return x
+
+#     coords = []
+#     types = []
+#     for v in valid:
+#         coords += [k.coords for k in v.atoms]
+#         types += [(
+#             k.atomicnum,
+#             int(k.OBAtom.IsAromatic()),
+#             int(k.OBAtom.IsHbondDonor()),
+#             int(k.OBAtom.IsHbondAcceptor()),
+#             conv_charge(k.OBAtom.GetPartialCharge())
+#         ) for k in v.atoms]
+
+#     return np.array(coords), np.array(types)
+
+
 def load_receptor_ob(rec_path):
-    rec = next(pybel.readfile('pdb', rec_path))
-    valid = [r for r in rec.residues if r.name != 'HOH']
+    rec = load_receptor(rec_path)
 
-    # map partial charge into byte range
-    def conv_charge(x):
-        x = max(x,-0.5)
-        x = min(x,0.5)
-        x += 0.5
-        x *= 255
-        x = int(x)
-        return x
+    coords = get_coords(rec)
+    types = np.array(get_types(rec))
+    types = np.concatenate([
+        types.reshape(-1,1), 
+        np.zeros((len(types), 4))
+    ], 1)
 
-    coords = []
-    types = []
-    for v in valid:
-        coords += [k.coords for k in v.atoms]
-        types += [(
-            k.atomicnum,
-            int(k.OBAtom.IsAromatic()),
-            int(k.OBAtom.IsHbondDonor()),
-            int(k.OBAtom.IsHbondAcceptor()),
-            conv_charge(k.OBAtom.GetPartialCharge())
-        ) for k in v.atoms]
-
-    return np.array(coords), np.array(types)
+    return coords, types
 
 
 def get_connection_point(frag):

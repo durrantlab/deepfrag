@@ -19,9 +19,13 @@ import json
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import wandb
 import tqdm
 import numpy as np
+
+try:
+    import wandb
+except:
+    pass
 
 from leadopt.models.voxel import VoxelFingerprintNet
 from leadopt.data_util import FragmentDataset, SharedFragmentDataset, FingerprintDataset, LIG_TYPER,\
@@ -30,7 +34,7 @@ from leadopt.grid_util import get_batch
 from leadopt.metrics import mse, bce, tanimoto, cos, top_k_acc,\
     average_support, inside_support
 
-from config import partitions, moad_partitions
+from config import moad_partitions
 
 
 def get_bios(p):
@@ -309,36 +313,6 @@ class VoxelNet(LeadoptModel):
 
     def load_data(self):
         print('[*] Loading data...', flush=True)
-        # train_dat = FragmentDataset(
-        #     self._args['fragments'],
-        #     rec_typer=REC_TYPER[self._args['rec_typer']],
-        #     lig_typer=LIG_TYPER[self._args['lig_typer']],
-        #     # filter_rec=(
-        #     #     partitions.TRAIN if not self._args['no_partitions'] else None),
-        #     filter_rec=set(get_bios(moad_partitions.TRAIN)),
-        #     filter_smi=set(moad_partitions.TRAIN_SMI),
-        #     fdist_min=self._args['fdist_min'],
-        #     fdist_max=self._args['fdist_max'],
-        #     fmass_min=self._args['fmass_min'],
-        #     fmass_max=self._args['fmass_max'],
-        #     verbose=True
-        # )
-
-        # val_dat = FragmentDataset(
-        #     self._args['fragments'],
-        #     rec_typer=REC_TYPER[self._args['rec_typer']],
-        #     lig_typer=LIG_TYPER[self._args['lig_typer']],
-        #     # filter_rec=(
-        #     #     partitions.VAL if not self._args['no_partitions'] else None),
-        #     filter_rec=set(get_bios(moad_partitions.VAL)),
-        #     filter_smi=set(moad_partitions.VAL_SMI),
-        #     fdist_min=self._args['fdist_min'],
-        #     fdist_max=self._args['fdist_max'],
-        #     fmass_min=self._args['fmass_min'],
-        #     fmass_max=self._args['fmass_max'],
-        #     verbose=True
-        # )
-
         dat = FragmentDataset(
             self._args['fragments'],
             rec_typer=REC_TYPER[self._args['rec_typer']],
