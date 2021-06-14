@@ -7,9 +7,7 @@ DeepFrag is a machine learning model for fragment-based lead optimization. In th
 
 If you use DeepFrag in your research, please cite as:
 
-```
 Green, H., Koes, D. R., & Durrant, J. D. (2021). DeepFrag: a deep convolutional neural network for fragment-based lead optimization. Chemical Science.
-```
 
 ```tex
 @article{green2021deepfrag,
@@ -64,11 +62,14 @@ To remove a fragment, you specify a second atom that is contained in the fragmen
 
 By default, DeepFrag will print a list of fragment predictions to stdout similar to the [Browser App](https://durrantlab.pitt.edu/deepfrag/).
 
-- `--out <out.csv>`: Save predictions in CSV format to `out.csv`.
+- `--out <out.csv>`: Save predictions in CSV format to `out.csv`. Each line contains the fragment rank, score and SMILES string.
 
 ## Miscellaneous (optional)
 
+- `--full`: Generate SMILES strings with the full ligand structure instead of just the fragment.
 - `--cpu/--gpu`: DeepFrag will attempt to infer if a Cuda GPU is available and fallback to the CPU if it is not. You can set either the `--cpu` or `--gpu` flag to explicitly specify the target device.
+- `--num_grids <num>`: Number of grid rotations to use. Using more will take longer but produce a more stable prediction. (Default: 4)
+- `--top_k <k>`: Number of predictions to print in stdout. Use -1 to display all. (Default: 25)
 
 # Reproduce Results
 
