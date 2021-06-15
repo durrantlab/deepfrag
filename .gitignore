@@ -10,3 +10,4 @@ data/**
 .store/
 dist/**
 build/**
+.vscode

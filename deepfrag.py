@@ -1,4 +1,3 @@
-
 import argparse
 import functools
 import os
@@ -28,6 +27,7 @@ FINGERPRINTS_DOWNLOAD = 'https://durrantlab.pitt.edu/apps/deepfrag/files/fingerp
 
 RCSB_DOWNLOAD = 'https://files.rcsb.org/download/%s.pdb1'
 
+VERSION = "1.0.2"
 
 def download_remote(url, path, compression=None):
     r = requests.get(url, stream=True, allow_redirects=True)
@@ -70,16 +70,16 @@ def ensure_cli_data():
         if r.lower() == 'n':
             print('Exiting...')
             exit(-1)
-        
+
         print(f'Saving to {model_path}...')
         download_remote(MODEL_DOWNLOAD, model_path, compression='zip')
-        
+
     if not os.path.exists(str(fingerprints_path)):
         r = input('Fingerprint library not found, download it now? (11 MB) [Y/n]: ')
         if r.lower() == 'n':
             print('Exiting...')
             exit(-1)
-        
+
         print(f'Saving to {fingerprints_path}...')
         download_remote(FINGERPRINTS_DOWNLOAD, fingerprints_path, compression=None)
 
@@ -161,7 +161,7 @@ def preprocess_ligand(lig, conn, rvec):
 
 
 def lookup_atom_name(lig_path, name):
-    """Try to look up an atom by name. Returns the coordinate of the atom if 
+    """Try to look up an atom by name. Returns the coordinate of the atom if
     found."""
     p = prody.parsePDB(lig_path)
     p = p.select('name %s' % name)
@@ -254,7 +254,7 @@ def get_target_device(args) -> str:
 
 def generate_grids(args, model_args, rec_coords, rec_types, parent_coords, parent_types, conn, device):
     start = time.time()
-    
+
     print('[*] Generating grids ... ', end='', flush=True)
     batch = grid_util.get_raw_batch(
         rec_coords, rec_types, parent_coords, parent_types,
@@ -373,6 +373,14 @@ def run(args):
 
 
 def main():
+    global VERSION
+
+    print("\nDeepFrag " + VERSION)
+    print("\nIf you use DeepFrag in your research, please cite:\n")
+    print("Green, H., Koes, D. R., & Durrant, J. D. (2021). DeepFrag: a deep convolutional")
+    print("neural network for fragment-based lead optimization. Chemical Science.\n")
+
+
     ensure_cli_data()
 
     parser = argparse.ArgumentParser()
@@ -398,11 +406,11 @@ def main():
     # Misc
     parser.add_argument('--full', action='store_true', default=False,
         help='Print the full (fused) ligand structure.')
-    parser.add_argument('--num_grids', type=int, default=4, 
+    parser.add_argument('--num_grids', type=int, default=4,
         help='Number of grid rotations.')
-    parser.add_argument('--top_k', type=int, default=25, 
+    parser.add_argument('--top_k', type=int, default=25,
         help='Number of results to show. Set to -1 to show all.')
-    parser.add_argument('--out', type=str, 
+    parser.add_argument('--out', type=str,
         help='Path to output CSV file.')
     parser.add_argument('--cpu', action='store_true', default=False,
         help='Use the CPU for grid generation and predictions.')
@@ -417,7 +425,7 @@ def main():
         ([('rx', 'ry', 'rz'), ('rname',)], False),
         ([('cpu',), ('gpu',)], False)
     ]
-    
+
     for grp, req in groupings:
         partial = []
         complete = 0

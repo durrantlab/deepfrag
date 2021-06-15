@@ -1,6 +1,12 @@
 Changes
 =======
 
+1.0.2
+-----
+
+* Added a CLI implementation of the program. See `README.md` for details.
+* Added a version number and citation to the program output.
+
 1.0.1
 -----
 
