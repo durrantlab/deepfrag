@@ -6,3 +6,7 @@ data/**
 !data/README.md
 
 .DS_Store
+
+.store/
+dist/**
+build/**
