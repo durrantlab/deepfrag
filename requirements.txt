@@ -26,8 +26,9 @@ shortuuid==1.0.1
 six==1.15.0
 smmap==3.0.4
 subprocess32==3.5.4
-torch==1.6.0+cu101
-torchvision==0.7.0+cu101
+# pip install torch==1.6.0+cu101 torchvision==0.7.0+cu101 -f https://download.pytorch.org/whl/torch_stable.html
+#torch==1.6.0+cu101
+#torchvision==0.7.0+cu101
 tqdm==4.48.2
 urllib3==1.25.10
 wandb==0.9.4

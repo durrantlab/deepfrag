@@ -100,7 +100,8 @@ similar to the [Browser App](https://durrantlab.pitt.edu/deepfrag/).
 ### Miscellaneous (optional)
 
 - `--full`: Generate SMILES strings with the full ligand structure instead of
-  just the fragment.
+  just the fragment. (__IMPORTANT NOTE__: Bond orders are not assigned to the
+  parent portion of the full ligand structure. These must be added manually.)
 - `--cpu/--gpu`: DeepFrag will attempt to infer if a Cuda GPU is available and
   fallback to the CPU if it is not. You can set either the `--cpu` or `--gpu`
   flag to explicitly specify the target device.

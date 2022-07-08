@@ -1,6 +1,17 @@
 Changes
 =======
 
+1.0.3
+-----
+
+* CLI parameters `--cx`, `--cy`, `--cz`, `--rx`, `--ry`, and `--rz` can now be
+  floats (not just integers). We recommend specifying the exact atomic
+  coordinates of the connection and removal points.
+* Fixed a bug that caused the `--full` parameter to throw an error when
+  performing fragment addition (but not fragment replacement) using the CLI
+  implementation.
+* Minor updates to the documentation.
+
 1.0.2
 -----
 

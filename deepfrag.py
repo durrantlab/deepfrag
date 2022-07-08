@@ -27,7 +27,7 @@ FINGERPRINTS_DOWNLOAD = 'https://durrantlab.pitt.edu/apps/deepfrag/files/fingerp
 
 RCSB_DOWNLOAD = 'https://files.rcsb.org/download/%s.pdb1'
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 def download_remote(url, path, compression=None):
     r = requests.get(url, stream=True, allow_redirects=True)
@@ -130,16 +130,44 @@ def get_structure_paths(args) -> Tuple[str, str]:
         raise NotImplementedError()
 
 
-def preprocess_ligand(lig, conn, rvec):
+def preprocess_ligand_without_removal_point(lig, conn):
+    """
+    Mark the atom at conn as a connecting atom. Useful when adding a fragment.
+    """
+
+    lig_pos = lig.GetConformer().GetPositions()
+    lig_atm_conn_dist = np.sum((lig_pos - conn) ** 2, axis=1)
+    
+    # Get index of min
+    min_idx = int(np.argmin(lig_atm_conn_dist))
+
+    # Get atom at that position
+    lig_atm_conn = lig.GetAtomWithIdx(min_idx)
+
+    # Add a dummy atom to the ligand, connected to lig_atm_conn
+    dummy_atom = Chem.MolFromSmiles("*")
+    merged = Chem.RWMol(Chem.CombineMols(lig, dummy_atom))
+
+    idx_of_dummy_in_merged = int([a.GetIdx() for a in merged.GetAtoms() if a.GetAtomicNum() == 0][0])
+    bond = merged.AddBond(min_idx, idx_of_dummy_in_merged, Chem.rdchem.BondType.SINGLE)
+
+    return merged
+
+
+def preprocess_ligand_with_removal_point(lig, conn, rvec):
     """
     Remove the fragment from lig connected via the atom at conn and containing
-    the atom at rvec.
+    the atom at rvec. Useful when replacing a fragment.
     """
     # Generate all fragments.
     frags = util.generate_fragments(lig)
 
     for parent, frag in frags:
+        # Get the index of the dummy (connection) atom on the fragment.
         cidx = [a for a in frag.GetAtoms() if a.GetAtomicNum() == 0][0].GetIdx()
+
+        # Get the coordinates of the associated atom (the dummy atom's
+        # neighbor).
         vec = frag.GetConformer().GetAtomPosition(cidx)
         c_vec = np.array([vec.x, vec.y, vec.z])
 
@@ -150,6 +178,9 @@ def preprocess_ligand(lig, conn, rvec):
             min_dist = np.min(np.sum((frag_pos - rvec) ** 2, axis=1))
 
             if min_dist < 1e-3:
+                # You have found the parent/fragment split that correctly
+                # exposes the user-specified connection-point atom.
+
                 # Found fragment.
                 print('[*] Removing fragment with %d atoms (%s)' % (
                     frag_pos.shape[0] - 1, Chem.MolToSmiles(frag, False)))
@@ -202,8 +233,12 @@ def get_structures(args):
         pass
 
     if rvec is not None:
-        lig = preprocess_ligand(lig, conn, rvec)
-
+        # Fragment repalcement (rvec specified)
+        lig = preprocess_ligand_with_removal_point(lig, conn, rvec)
+    else:
+        # Only fragment addition
+        lig = preprocess_ligand_without_removal_point(lig, conn)
+    
     parent_coords = util.get_coords(lig)
     parent_types = np.array(util.get_types(lig)).reshape((-1,1))
 
@@ -321,6 +356,8 @@ def gen_output(args, scores):
 
 
 def fuse(lig, frag):
+    # Combine the ligand and fragment, though this does not form a bond between
+    # the two.
     merged = Chem.RWMol(Chem.CombineMols(lig, frag))
 
     conn_atoms = [a.GetIdx() for a in merged.GetAtoms() if a.GetAtomicNum() == 0]
@@ -337,6 +374,8 @@ def fuse(lig, frag):
 
 
 def fuse_fragments(lig, conn, scores):
+    # Note: lig is rdkit.Chem.rdchem.Mol; scores is a list of (smiles, score)
+    # tuples.
     new_sc = []
     for smi, score in scores:
         try:
@@ -380,7 +419,6 @@ def main():
     print("Green, H., Koes, D. R., & Durrant, J. D. (2021). DeepFrag: a deep convolutional")
     print("neural network for fragment-based lead optimization. Chemical Science.\n")
 
-
     ensure_cli_data()
 
     parser = argparse.ArgumentParser()
@@ -392,15 +430,15 @@ def main():
     parser.add_argument('--resnum', type=int, help='Residue number of ligand.')
 
     # Connection point
-    parser.add_argument('--cx', type=int, help='Connection point x coordinate.')
-    parser.add_argument('--cy', type=int, help='Connection point y coordinate.')
-    parser.add_argument('--cz', type=int, help='Connection point z coordinate.')
+    parser.add_argument('--cx', type=float, help='Connection point x coordinate.')
+    parser.add_argument('--cy', type=float, help='Connection point y coordinate.')
+    parser.add_argument('--cz', type=float, help='Connection point z coordinate.')
     parser.add_argument('--cname', type=str, help='Connection point atom name.')
 
     # Removal point
-    parser.add_argument('--rx', type=int, help='Removal point x coordinate.')
-    parser.add_argument('--ry', type=int, help='Removal point y coordinate.')
-    parser.add_argument('--rz', type=int, help='Removal point z coordinate.')
+    parser.add_argument('--rx', type=float, help='Removal point x coordinate.')
+    parser.add_argument('--ry', type=float, help='Removal point y coordinate.')
+    parser.add_argument('--rz', type=float, help='Removal point z coordinate.')
     parser.add_argument('--rname', type=str, help='Removal point atom name.')
 
     # Misc
