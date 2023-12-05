@@ -262,7 +262,7 @@ def get_fingerprints(args):
     print('[*] Loading fingerprint library ... ', end='')
     with h5py.File(str(get_fingerprints_path()), 'r') as f:
         f_smiles = f['smiles'][()]
-        f_fingerprints = f['fingerprints'][()].astype(np.float)
+        f_fingerprints = f['fingerprints'][()].astype(float)
     print('done.')
 
     return (f_smiles, f_fingerprints)

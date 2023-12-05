@@ -8,11 +8,11 @@ gitdb==4.0.5
 GitPython==3.1.7
 gql==0.2.0
 graphql-core==1.1
-h5py==2.10.0
+h5py==3.10.0
 idna==2.10
 llvmlite==0.33.0
 numba==0.50.1
-numpy==1.19.1
+numpy==1.24.4
 nvidia-ml-py3==7.352.0
 pathtools==0.1.2
 Pillow==7.2.0
@@ -26,9 +26,6 @@ shortuuid==1.0.1
 six==1.15.0
 smmap==3.0.4
 subprocess32==3.5.4
-# pip install torch==1.6.0+cu101 torchvision==0.7.0+cu101 -f https://download.pytorch.org/whl/torch_stable.html
-#torch==1.6.0+cu101
-#torchvision==0.7.0+cu101
 tqdm==4.48.2
 urllib3==1.25.10
 wandb==0.9.4
