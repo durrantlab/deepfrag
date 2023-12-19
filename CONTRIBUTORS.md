@@ -5,3 +5,4 @@ Contributors
 * Jacob Durrant
 * David Koes
 * Vandan Revanur
+* Martin Salinas
