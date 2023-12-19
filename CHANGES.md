@@ -4,11 +4,13 @@ Changes
 WIP
 ---
 
-* Updated packages in requirements.txt
+* Updated packages in `requirements.txt`
 * Fingerprint now cast as float instead of np.float
-* Minor updates to README.md
+* Minor updates to `README.md`
 * Fixed an error that prevented DeepFrag from loading PDB files without the .pdb
   extension. (Affects only recent versions of prody?)
+* Added `test_installation.sh` to make it easy to verify that DeepFrag is
+  installed correctly. Downloads sample data (PDB ID 1XDN) and runs DeepFrag.
 
 1.0.3
 -----
