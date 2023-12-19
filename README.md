@@ -209,6 +209,7 @@ You can build a virtualenv with the requirements:
 $ python3 -m venv leadopt_env
 $ source ./leadopt_env/bin/activate
 $ pip install -r requirements.txt
+$ pip install torch==1.6.0+cu101 torchvision==0.7.0+cu101 -f https://download.pytorch.org/whl/torch_stable.html
 ```
 
 Note: `Cuda 10.1` is required during training
