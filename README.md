@@ -209,6 +209,7 @@ You can build a virtualenv with the requirements:
 $ python3 -m venv leadopt_env
 $ source ./leadopt_env/bin/activate
 $ pip install -r requirements.txt
+$ pip install prody
 $ pip install torch==2.1.2+cu118 torchvision==0.16.2+cu118 --index-url https://download.pytorch.org/whl/cu118
 ```
 
