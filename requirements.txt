@@ -31,3 +31,4 @@ urllib3==1.25.10
 wandb==0.9.4
 watchdog==0.10.3
 rdkit==2023.09.2
+prody==2.4.1
