@@ -26,7 +26,8 @@ prody.utilities.logger.LOGGER.verbosity = 'none'
 
 
 def load_example(path, target):
-    m = prody.parsePDB(path)
+    with open(path, 'r') as f:
+        m = prody.parsePDBStream(f)
 
     rec = m.select('not (nucleic or hetatm) and not water')
 

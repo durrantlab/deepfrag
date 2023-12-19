@@ -104,7 +104,8 @@ def load_pdb(pdb_id, resnum):
     if not os.path.exists(complex_path):
         download_pdb(pdb_id, complex_path)
 
-    m = prody.parsePDB(str(complex_path))
+    with open(str(complex_path), 'r') as f:
+        m = prody.parsePDBStream(f)
     rec = m.select('not (nucleic or hetatm) and not water')
     lig = m.select('resnum %d' % resnum)
 
@@ -194,13 +195,14 @@ def preprocess_ligand_with_removal_point(lig, conn, rvec):
 def lookup_atom_name(lig_path, name):
     """Try to look up an atom by name. Returns the coordinate of the atom if
     found."""
-    p = prody.parsePDB(lig_path)
-    p = p.select('name %s' % name)
+    with open(lig_path, 'r') as f:
+        p = prody.parsePDBStream(f)
+    p = p.select(f'name {name}')
     if p is None:
-        print('[!] Error: no atom with name "%s" in ligand' % name)
+        print(f'[!] Error: no atom with name "{name}" in ligand')
         exit(-1)
     elif len(p) > 1:
-        print('[!] Error: multiple atoms with name "%s" in ligand' % name)
+        print(f'[!] Error: multiple atoms with name "{name}" in ligand')
         exit(-1)
     return p.getCoords()[0]
 

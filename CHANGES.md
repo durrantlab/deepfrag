@@ -1,6 +1,14 @@
 Changes
 =======
 
+WIP
+---
+
+* Updated packages in requirements.txt
+* Fingerprint now cast as float instead of np.float
+* Fixed an error that prevented DeepFrag from loading PDB files without .pdb
+  extension. (Affects only recent versions of prody?)
+
 1.0.3
 -----
 
