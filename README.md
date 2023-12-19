@@ -42,7 +42,7 @@ There are three ways to use DeepFrag:
    Google Colab (Jupyter notebook) that demonstrates how to perform manual
    predictions.
     - See the interactive
-      [Colab](https://colab.research.google.com/drive/1XWin26iDXqZ2ioGtwDRuO4iRomGVpdte).
+      [Colab](https://colab.research.google.com/drive/1If8rWQ9aVKJyJwfaOql56mA2llqC0iur).
 
 ## DeepFrag CLI
 
