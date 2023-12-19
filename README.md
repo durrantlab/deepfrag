@@ -211,12 +211,19 @@ $ source ./leadopt_env/bin/activate
 $ pip install -r requirements.txt
 $ pip install prody
 $ pip install torch==2.1.2+cu118 torchvision==0.16.2+cu118 --index-url https://download.pytorch.org/whl/cu118
+$ sudo apt install nvidia-cuda-toolkit
 ```
 
-<!-- pip install torch==1.6.0+cu101 torchvision==0.7.0+cu101 -f https://download.pytorch.org/whl/torch_stable.html -->
-<!-- 2.1.2+cu118 -->
+Regarding the nvidia-cuda-toolkit, you may wish to ensure that the toolkit
+version matches cuda installed on your machine. You can check the version of
+cuda by running the following commands:
 
-Note: `Cuda 10.1` is required during training
+```sh
+$ nvcc --version
+$ nvidia-smi
+```
+
+Note: We used `Cuda 10.1` for training.
 
 ## Training
 
