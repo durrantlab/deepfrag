@@ -27,7 +27,7 @@ FINGERPRINTS_DOWNLOAD = 'https://durrantlab.pitt.edu/apps/deepfrag/files/fingerp
 
 RCSB_DOWNLOAD = 'https://files.rcsb.org/download/%s.pdb1'
 
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 def download_remote(url, path, compression=None):
     r = requests.get(url, stream=True, allow_redirects=True)

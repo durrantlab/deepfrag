@@ -1,8 +1,8 @@
 Changes
 =======
 
-WIP
----
+1.0.4
+-----
 
 * Updated packages in `requirements.txt`
 * Fingerprint now cast as float instead of np.float
